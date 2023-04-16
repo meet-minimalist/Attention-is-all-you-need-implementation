@@ -1,0 +1,9 @@
+; Author: Meet Patel
+; .flake8 (c) 2023
+; Created:  2023-03-24T03:19:43.975Z
+; Modified: 2023-03-24T03:20:37.932Z
+ 
+
+[flake8]
+ignore = E211, E999, F401, F821, W503
+max-doc-length = 72

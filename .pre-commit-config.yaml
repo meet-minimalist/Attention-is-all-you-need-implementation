@@ -1,0 +1,20 @@
+##
+# @author Meet Patel <>
+# @file Description
+# @desc Created on 2023-04-16 8:32:02 pm
+# @copyright MIT License
+#
+
+repos:
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.7.0
+    hooks:
+      - id: isort
+  - repo: https://github.com/psf/black
+    rev: 20.8b1
+    hooks:
+      - id: black
+  - repo: https://github.com/PyCQA/flake8
+    rev: 3.8.4
+    hooks:
+      - id: flake8
