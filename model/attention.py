@@ -84,30 +84,49 @@ class MultiHeadAttention(nn.Module):
 
         self.scale = 1 / np.sqrt(self.d_model)
 
-    def __get_mask_q_k(self, q_k: torch.Tensor) -> torch.Tensor:
+    def __get_mask_q_k(
+        self, q_k: torch.Tensor, mask: torch.Tensor = None
+    ) -> torch.Tensor:
         """Function to get the mask to be used before softmax such that only the
         tokens before the current token gets attended by current token.
 
         Args:
             q_k (torch.Tensor): Tensor generated after matmul of Q and K.
+            mask (torch.Tensor): Mask to be used to computed masked_q_k.
+                Defaults to None.
 
         Returns:
             torch.Tensor: Masked tensor output.
         """
         # q_k : [batch, num_heads, seq_len_q, seq_len_k]
-        masked_q_k = torch.tril(q_k)
-        masked_q_k = masked_q_k.masked_fill(masked_q_k == 0, float("-inf"))
+        # mask: [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
+        if mask is None:
+            mask = torch.tril(q_k)
+
+        masked_q_k = q_k.masked_fill(mask == 0, float("-inf"))
         return masked_q_k
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # input     : [batch, seq_len, emb_size]
+    def forward(
+        self, x: torch.Tensor, y: torch.Tensor = None, mask: torch.Tensor = None
+    ) -> torch.Tensor:
+        # x         : [batch, seq_len, emb_size]
+        # y         : [batch, num_heads, seq_len, seq_len]. Optional parameter.
+        #           : If this is provided then use it for cross attention.
+        #           : i.e. Q and K vectors are generated using x which is encoder
+        #           : representation and V vector is generated using y which is
+        #           : decoder representation. In this case the mask shall be of
+        #           : encoder mask as we need mask only for Q and K.
+        # mask      : [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
         # output    : [batch, seq_len, emb_size]
 
         # seq_len_q = seq_len_k = seq_len_v
         # The representation will be different. Dimensions will be same.
         q = self.query(x)  # [batch, seq_len_q, num_heads, d_k]
         k = self.key(x)  # [batch, seq_len_k, num_heads, d_k]
-        v = self.value(x)  # [batch, seq_len_v, num_heads, d_v]
+        if y is None:
+            v = self.value(x)  # [batch, seq_len_v, num_heads, d_v]
+        else:
+            v = self.value(y)  # [batch, seq_len_v, num_heads, d_v]
 
         q = q.permute(0, 2, 1, 3)  # [batch, num_heads, seq_len_q, d_k]
         k = k.permute(0, 2, 3, 1)  # [batch, num_heads, d_k, seq_len_k]
@@ -120,7 +139,7 @@ class MultiHeadAttention(nn.Module):
         # the tokens upto ith index in k. That way we stop the q to look into
         # k's future token which is tokens after ith location.
         masked_q_kT_scaled = self.__get_mask_q_k(
-            q_kT_scaled
+            q_kT_scaled, mask
         )  # [batch, num_heads, seq_len_q, seq_len_k]
         # For that we removed upper triangle of [seq_len_q, seq_len_k] and fill
         # all the values with -inf. So when we apply softmax those values with

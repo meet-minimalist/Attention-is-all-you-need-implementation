@@ -29,6 +29,20 @@ class TestMultiHeadAttention:
         res = self.atten_block(x)
         assert x.shape == res.shape
 
+        # masked multi head attention
+        mask = torch.tril(
+            torch.ones(size=[self.batch_size, 1, self.seq_len, self.seq_len])
+        )
+        res = self.atten_block(x, mask=mask)
+        assert x.shape == res.shape
+
+        # multi head cross attention
+        y = torch.randn(self.batch_size, self.seq_len, self.emb_size)
+        mask = torch.ones(size=[self.batch_size, 1, 1, self.seq_len])
+        mask[:, :, :, (self.seq_len // 2) :] = 0
+        res = self.atten_block(x, y, mask)
+        assert x.shape == res.shape
+
     def test_num_params(self):
         """Test case to check number of learnable parameters in the layer."""
         for name, weight in self.atten_block.named_parameters():

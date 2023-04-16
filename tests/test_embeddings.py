@@ -15,7 +15,7 @@ class TestEmbeddings:
     def setup_class(self):
         self.batch_size = 4
         self.seq_len = 128
-        self.vocab_size = c.vocab_size
+        self.vocab_size = c.enc.vocab_size
         self.emb_dims = c.d_model
         self.emb_layer = Embeddings(self.vocab_size, self.emb_dims)
 

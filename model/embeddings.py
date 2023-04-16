@@ -27,6 +27,7 @@ class Embeddings(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # input     : [batch, seq_len]
         # output    : [batch, seq_len, emb_size]
+
         embeddings = self.emb_layer(x) * np.sqrt(
             self.emb_dims
         )  # [batch, seq_len, emb_size]

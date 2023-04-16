@@ -55,11 +55,12 @@ class EncoderBlock(nn.Module):
         self.layer_norm_1 = nn.LayerNorm(self.d_model)
         self.layer_norm_2 = nn.LayerNorm(self.d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         # input     : [batch, seq_len, emb_size]
+        # mask      : [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
         # output    : [batch, seq_len, emb_size]
 
-        mha_res = self.mha(x)  # [batch, seq_len, emb_size]
+        mha_res = self.mha(x, mask=mask)  # [batch, seq_len, emb_size]
         mha_res = self.dropout_layer_1(mha_res)
         mha_res = self.layer_norm_1(x + mha_res)  # [batch, seq_len, emb_size]
 
@@ -99,18 +100,18 @@ class Encoder(nn.Module):
                 Defaults to 0.1.
         """
         super().__init__()
-        self.d_model = d_model
         self.encoders = nn.ModuleList(
             [
-                EncoderBlock(self.d_model, d_k, d_v, d_ff, num_heads, use_bias, dropout)
+                EncoderBlock(d_model, d_k, d_v, d_ff, num_heads, use_bias, dropout)
                 for _ in range(n_blocks)
             ]
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         # input     : [batch, seq_len, emb_size]
+        # mask      : [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
         # output    : [batch, seq_len, emb_size]
 
         for encoder in self.encoders:
-            x = encoder(x)
+            x = encoder(x, mask=mask)
         return x

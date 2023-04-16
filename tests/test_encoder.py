@@ -40,6 +40,11 @@ class TestEncoder:
         res = self.encoder(data)
         assert res.shape == data.shape
 
+        mask = torch.ones(size=[self.batch_size, 1, 1, self.seq_len])
+        mask[:, :, :, (self.seq_len // 2) :] = 0
+        res = self.encoder(data, mask)
+        assert res.shape == data.shape
+
     def test_num_params(self):
         """Test case to check number of learnable parameters in the layer."""
         for name, weight in self.encoder.named_parameters():

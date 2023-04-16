@@ -7,9 +7,8 @@
 from dataclasses import dataclass
 
 d_model = 512
-vocab_size = 30000
-
 pos_dropout = 0.1
+max_len = 3000
 
 
 @dataclass
@@ -19,6 +18,7 @@ class EncoderConfig:
     num_block = 6
     d_ff = 2048
     use_bias = True
+    vocab_size = 30000
 
 
 @dataclass
@@ -28,6 +28,7 @@ class DecoderConfig:
     num_block = 6
     d_ff = 2048
     use_bias = True
+    vocab_size = 40000
 
 
 enc = EncoderConfig()
