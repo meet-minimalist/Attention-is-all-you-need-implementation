@@ -14,14 +14,7 @@ repos:
     rev: 20.8b1
     hooks:
       - id: black
-<<<<<<< HEAD
-  - repo: https://github.com/PyCQA/flake8
-    rev: 3.8.4
-    hooks:
-      - id: flake8
-=======
-  # - repo: https://github.com/PyCQA/flake8
-  #   rev: 3.8.4
-  #   hooks:
-  #     - id: flake8
->>>>>>> 2db3231 (Updated basic building blocks)
+# - repo: https://github.com/PyCQA/flake8
+#   rev: 3.8.4
+#   hooks:
+#     - id: flake8
