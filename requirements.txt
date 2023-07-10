@@ -1,0 +1,6 @@
+numpy==1.24.1
+tokenizers==0.13.3
+torch==2.0.1+cu118
+torchsummary==1.5.1
+torchtext==0.15.2
+tqdm==4.65.0

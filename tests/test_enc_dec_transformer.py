@@ -8,7 +8,7 @@
 import torch
 
 import config as c
-from model.enc_dec_transformers import TransformerEncoderDecoder
+from model.enc_dec_transformer import TransformerEncoderDecoder
 
 
 class TestTransformers:
