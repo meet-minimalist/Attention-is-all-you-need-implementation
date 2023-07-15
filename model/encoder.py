@@ -22,6 +22,7 @@ class EncoderBlock(nn.Module):
         num_heads: int = 8,
         bias: bool = True,
         drop_prob: float = 0.1,
+        pad_token: int = 0,
     ) -> None:
         """Initializer for single encoder block
 
@@ -37,6 +38,8 @@ class EncoderBlock(nn.Module):
             bias (bool, optional): Use bias for all the layers. Defaults to True.
             drop_prob (float, optional): Dropout rate used across encoder.
                 Defaults to 0.1.
+            pad_token (int, optional): Pad token to be used for masked softmax.
+                Defaults to 0.
         """
         super().__init__()
         self.d_model = d_model
@@ -46,8 +49,15 @@ class EncoderBlock(nn.Module):
         self.num_heads = num_heads
         self.bias = bias
         self.d_ff = d_ff
+        self.pad_token = pad_token
         self.mha = MultiHeadAttention(
-            self.d_model, self.d_k, self.d_v, self.drop_prob, self.num_heads, self.bias
+            self.d_model,
+            self.d_k,
+            self.d_v,
+            self.drop_prob,
+            self.num_heads,
+            self.bias,
+            self.pad_token,
         )
         self.pff = PointwiseFeedForwardNetwork(self.d_model, self.d_ff, self.drop_prob)
         self.dropout_layer_1 = nn.Dropout(drop_prob)
@@ -55,12 +65,12 @@ class EncoderBlock(nn.Module):
         self.layer_norm_1 = nn.LayerNorm(self.d_model)
         self.layer_norm_2 = nn.LayerNorm(self.d_model)
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         # input     : [batch, seq_len, emb_size]
-        # mask      : [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
+        # mask      : [batch, 1, 1, seq_len]
         # output    : [batch, seq_len, emb_size]
 
-        mha_res = self.mha(x, mask=mask)  # [batch, seq_len, emb_size]
+        mha_res = self.mha(x, x, x, mask)  # [batch, seq_len, emb_size]
         mha_res = self.dropout_layer_1(mha_res)
         mha_res = self.layer_norm_1(x + mha_res)  # [batch, seq_len, emb_size]
 
@@ -81,6 +91,7 @@ class Encoder(nn.Module):
         n_blocks: int = 6,
         use_bias: bool = True,
         dropout: float = 0.1,
+        pad_token: int = 0,
     ):
         """Initializer for encoder class.
 
@@ -98,20 +109,24 @@ class Encoder(nn.Module):
             use_bias (bool, optional): Use bias for all the layers. Defaults to True.
             dropout (float, optional): Dropout rate used across encoder.
                 Defaults to 0.1.
+            pad_token (int, optional): Pad token to be used for masked softmax.
+                Defaults to 0.
         """
         super().__init__()
         self.encoders = nn.ModuleList(
             [
-                EncoderBlock(d_model, d_k, d_v, d_ff, num_heads, use_bias, dropout)
+                EncoderBlock(
+                    d_model, d_k, d_v, d_ff, num_heads, use_bias, dropout, pad_token
+                )
                 for _ in range(n_blocks)
             ]
         )
 
-    def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         # input     : [batch, seq_len, emb_size]
-        # mask      : [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
+        # mask      : [batch, 1, 1, seq_len] for self attention in encoder
         # output    : [batch, seq_len, emb_size]
 
         for encoder in self.encoders:
-            x = encoder(x, mask=mask)
+            x = encoder(x, mask)
         return x

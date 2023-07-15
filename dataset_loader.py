@@ -6,13 +6,15 @@
 #
 
 import random
+from typing import List, Tuple
 
 import torch
 from tokenizers import Tokenizer
-from tokenizers.models import BPE
 from tokenizers.processors import TemplateProcessing
-from torch.utils.data import DataLoader, Dataset, Sampler
+from torch.utils.data import DataLoader, Sampler
 from torchtext.datasets import IWSLT2016
+
+from model.utils import get_src_pad_mask, get_trg_pad_mask
 
 
 def load_tokenizer(tokenizer_path: str) -> Tokenizer:
@@ -42,13 +44,27 @@ def load_tokenizer(tokenizer_path: str) -> Tokenizer:
 class BatchSamplerSimilarLength(Sampler):
     def __init__(
         self,
-        dataset_iterator,
-        tokenizer_de,
-        batch_size,
-        seq_len,
-        indices=None,
-        shuffle=True,
+        dataset_iterator: List,
+        tokenizer_de: str,
+        batch_size: int,
+        seq_len: int,
+        shuffle: bool = True,
     ):
+        """Initializer to load the dataset and sort as per the source sequences
+        (german sequence) and prepare the indices in a bucketed manner where the
+        sequences with similar lengths are grouped together.
+
+        Args:
+            dataset_iterator (List): Dataset iterator converted in list form to
+                iterate upon.
+            tokenizer_de (str): Source sequence tokenizer. e.g. German tokenizer.
+            batch_size (int): Batch size to be used to compute upper limit of
+                tokens.
+            seq_len (int): Sequence length to be used to compute upper limit of
+                tokens.
+            shuffle (bool, optional): Shuffle the dataset before sorting and
+                after getting the buckets. Defaults to True.
+        """
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.total_tokens_in_batch = self.batch_size * self.seq_len
@@ -60,10 +76,6 @@ class BatchSamplerSimilarLength(Sampler):
             (i, len(tokenizer_de.encode(src_text).ids))
             for i, (src_text, tar_text) in enumerate(dataset_iterator)
         ]
-
-        # if indices are passed, then use only the ones passed (for ddp)
-        if indices is not None:
-            self.indices = torch.tensor(self.indices)[indices].tolist()
 
         if self.shuffle:
             random.shuffle(self.indices)
@@ -88,23 +100,47 @@ class BatchSamplerSimilarLength(Sampler):
         if self.shuffle:
             random.shuffle(self.all_batch_idx)
 
-    def __iter__(self):
+    def __iter__(self) -> List[int]:
+        """Function will fetch list of indices to be used to generate a batch.
+
+        Yields:
+            List[int]: Yields list of indices for batch generation.
+        """
         for batch_idx in self.all_batch_idx:
             yield batch_idx
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Function to get the total number of batches which can be generated.
+
+        Returns:
+            int: Number of batches from the given dataset.
+        """
         return len(self.all_batch_idx)
 
 
 class DataloaderHelper:
     def __init__(
         self,
-        tokenizer_path_en,
-        tokenizer_path_de,
-        batch_size=8,
-        seq_len=128,
-        split="train",
+        tokenizer_path_en: str,
+        tokenizer_path_de: str,
+        batch_size: int = 8,
+        seq_len: int = 128,
+        split: str = "train",
     ):
+        """Initializer to load the dataset, prepare for training and convert it
+        into dataloader format.
+
+        Args:
+            tokenizer_path_en (str): Path for english tokenizer.
+            tokenizer_path_de (str): Path for German tokenizer.
+            batch_size (int, optional): Batch size to be used. Defaults to 8.
+            seq_len (int, optional): Sequence length to be used for combining
+                sequences together. It will not produce all the samples of the
+                batch as per this sequence length. But this value and batch size
+                will provide some upper value which we can manage to load on GPU
+                if all the tokens are non-pad tokens. Defaults to 128.
+            split (str, optional): Type of dataset split. Defaults to "train".
+        """
         self.batch_size = batch_size
         self.seq_len = seq_len
         self.dataset_iterator = IWSLT2016(
@@ -118,12 +154,11 @@ class DataloaderHelper:
         self.tokenizer_en = load_tokenizer(tokenizer_path_en)
         self.tokenizer_de = load_tokenizer(tokenizer_path_de)
 
-    def get_iterator(self):
+    def get_iterator(self) -> DataLoader:
         dataloader = DataLoader(
             self.dataset_iterator,
             batch_sampler=BatchSamplerSimilarLength(
                 dataset_iterator=self.dataset_iterator,
-                tokenizer_en=self.tokenizer_en,
                 tokenizer_de=self.tokenizer_de,
                 batch_size=self.batch_size,
                 seq_len=self.seq_len,
@@ -133,7 +168,16 @@ class DataloaderHelper:
         )
         return dataloader
 
-    def collate_batch(self, batch_data):
+    def collate_batch(self, batch_data: List) -> Tuple[torch.Tensor]:
+        """Function to tokenize sequences and prepare the mask for training.
+
+        Args:
+            batch_data (List): List of Tuple of source and target sequences.
+
+        Returns:
+            Tuple[torch.Tensor]: Tuple of source token, target token, source
+                mask, target mask and target labels.
+        """
         src_tokens, tar_tokens = [], []
         # src is german and tar is english.
         for src_text, tar_text in batch_data:
@@ -152,7 +196,11 @@ class DataloaderHelper:
                 for tokenized_seq in self.tokenizer_en.encode_batch(tar_tokens)
             ]
         )
-        return src_tokens, tar_tokens
+        tar_labels = tar_tokens[:, 1:]
+        tar_tokens = tar_tokens[:, :-1]
+        src_mask = get_src_pad_mask(src_tokens, self.tokenizer_de.token_to_id("[PAD]"))
+        tar_mask = get_trg_pad_mask(tar_tokens, self.tokenizer_en.token_to_id("[PAD]"))
+        return src_tokens, tar_tokens, src_mask, tar_mask, tar_labels
 
 
 if __name__ == "__main__":
@@ -166,3 +214,5 @@ if __name__ == "__main__":
     train_iter = train_dataloader.get_iterator()
     print("Dataloaded")
     op = next(iter(train_iter))
+    print(len(op))
+    print([s.shape for s in op])

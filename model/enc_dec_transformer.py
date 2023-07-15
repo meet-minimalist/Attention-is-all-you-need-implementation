@@ -28,11 +28,13 @@ class TransformerEncoderDecoder(nn.Module):
         enc_num_blocks: int = 6,
         enc_d_ff: int = 2048,
         enc_use_bias: bool = True,
+        enc_pad_token: int = 0,
         dec_dropout: float = 0.1,
         dec_num_heads: int = 8,
         dec_num_blocks: int = 6,
         dec_d_ff: int = 2048,
         dec_use_bias: bool = True,
+        dec_pad_token: int = 0,
     ):
         """Initializer for encoder class.
 
@@ -56,6 +58,8 @@ class TransformerEncoderDecoder(nn.Module):
                 layer in encoder. Defaults to 2048.
             enc_use_bias (bool, optional): Use bias for all encoder layers.
                 Defaults to True.
+            enc_pad_token (int, optional): Pad token to be used for masked
+                softmax in encoder. Defaults to 0.
             dec_dropout (float, optional): Dropout rate used across decoder.
             dec_num_heads (int, optional): Number of parallel heads in Multi head
                 attention block in decoder. Defaults to 8.
@@ -65,6 +69,8 @@ class TransformerEncoderDecoder(nn.Module):
                 layer in decoder. Defaults to 2048.
             dec_use_bias (bool, optional): Use bias for all decoder layers.
                 Defaults to True.
+            dec_pad_token (int, optional): Pad token to be used for masked
+                softmax in decoder. Defaults to 0.
         """
         super().__init__()
 
@@ -79,6 +85,7 @@ class TransformerEncoderDecoder(nn.Module):
         self.enc_num_blocks = enc_num_blocks
         self.enc_d_ff = enc_d_ff
         self.enc_use_bias = enc_use_bias
+        self.enc_pad_token = enc_pad_token
 
         self.dec_dropout = dec_dropout
         self.dec_num_heads = dec_num_heads
@@ -86,6 +93,7 @@ class TransformerEncoderDecoder(nn.Module):
         self.dec_num_blocks = dec_num_blocks
         self.dec_d_ff = dec_d_ff
         self.dec_use_bias = dec_use_bias
+        self.dec_pad_token = dec_pad_token
 
         self.enc_emb_layer = Embeddings(self.enc_vocab_size, self.d_model)
         self.enc_pos_emb_layer = PositionalEmbeddings(
@@ -100,6 +108,7 @@ class TransformerEncoderDecoder(nn.Module):
             self.enc_num_blocks,
             self.enc_use_bias,
             self.enc_dropout,
+            self.enc_pad_token,
         )
 
         self.dec_emb_layer = Embeddings(self.dec_vocab_size, self.d_model)
@@ -115,6 +124,7 @@ class TransformerEncoderDecoder(nn.Module):
             self.dec_num_blocks,
             self.dec_use_bias,
             self.dec_dropout,
+            self.dec_pad_token,
         )
 
         self.decoder_generator = DecoderGenerator(
@@ -124,10 +134,6 @@ class TransformerEncoderDecoder(nn.Module):
     def encoder(self, enc_seq: torch.Tensor, enc_mask: torch.Tensor) -> torch.Tensor:
         # enc_seq   : [batch, seq_len]
         # enc_mask  : [batch, 1, 1, seq_len] for encoder
-
-        if enc_mask is None:
-            enc_mask = get_src_pad_mask(enc_seq, pad_idx=0, for_encoder=True)
-            # mask: [batch, 1, 1, seq_len] for encoder
 
         enc_repr = self.enc_emb_layer(enc_seq)  # [batch, seq_len, emb_size]
         enc_repr = self.enc_pos_emb_layer(enc_repr)  # [batch, seq_len, emb_size]
@@ -139,16 +145,12 @@ class TransformerEncoderDecoder(nn.Module):
         enc_repr: torch.Tensor,
         dec_seq: torch.Tensor,
         enc_mask: torch.Tensor,
-        dec_mask: torch.Tensor = None,
+        dec_mask: torch.Tensor,
     ) -> torch.Tensor:
         # enc_seq   : [batch, seq_len]
         # dec_seq   : [batch, seq_len]
-        # enc_mask  : [batch, 1, 1, seq_len] for encoder
-        # dec_mask  : [batch, 1, seq_len, seq_len] for decoder
-
-        if dec_mask is None:
-            dec_mask = get_trg_pad_mask(dec_seq, pad_idx=0, for_encoder=False)
-            # mask: [batch, 1, seq_len, seq_len] for decoder
+        # enc_mask  : [batch, 1, 1, seq_len] for encoder-decoder cross attention
+        # dec_mask  : [batch, 1, seq_len, seq_len] for decoder self attention
 
         dec_repr = self.dec_emb_layer(dec_seq)  # [batch, seq_len, emb_size]
         dec_repr = self.dec_pos_emb_layer(dec_repr)  # [batch, seq_len, emb_size]

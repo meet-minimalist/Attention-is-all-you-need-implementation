@@ -32,14 +32,12 @@ class TestEncoder:
             self.n_blocks,
             self.use_bias,
             self.dropout,
+            pad_token=0,
         )
 
     def test_shapes(self):
         """Test case to check output shapes."""
         data = torch.randn(self.batch_size, self.seq_len, self.emb_size)
-        res = self.encoder(data)
-        assert res.shape == data.shape
-
         mask = torch.ones(size=[self.batch_size, 1, 1, self.seq_len])
         mask[:, :, :, (self.seq_len // 2) :] = 0
         res = self.encoder(data, mask)

@@ -131,3 +131,4 @@ dmypy.json
 # Directories created by us
 datasets/
 extras/
+training_data/

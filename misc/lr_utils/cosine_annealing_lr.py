@@ -18,7 +18,7 @@ class CosineAnnealing(LearningRateScheduler):
         super().__init__(*args, **kwargs)
 
         self.logger = Logger()
-        required_keys = ["burn_in_steps", "epochs", "init_lr", "steps_per_epoch"]
+        required_keys = ["burn_in_epochs", "epochs", "init_lr", "steps_per_epoch"]
 
         if set(kwargs.keys()) != set(required_keys):
             missing_keys = set(required_keys).difference(set(kwargs.keys()))
@@ -27,10 +27,11 @@ class CosineAnnealing(LearningRateScheduler):
             )
             sys.exit()
 
-        self.burn_in_steps = kwargs["burn_in_steps"]
+        self.burn_in_epochs = kwargs["burn_in_epochs"]
         self.epochs = kwargs["epochs"]
         self.init_lr = kwargs["init_lr"]
         self.steps_per_epoch = kwargs["steps_per_epoch"]
+        self.burn_in_steps = self.burn_in_epochs * self.steps_per_epoch
         self.cosine_iters = self.steps_per_epoch * self.epochs - self.burn_in_steps
 
     def get_lr(self, g_step: int) -> float:

@@ -18,6 +18,8 @@ class TestTransformers:
         self.enc_vocab_size = c.enc.vocab_size
         self.dec_vocab_size = c.dec.vocab_size
         self.emb_dims = c.d_model
+        enc_pad_token = 0
+        dec_pad_token = 0
         self.transformer = TransformerEncoderDecoder(
             c.enc.vocab_size,
             c.dec.vocab_size,
@@ -29,11 +31,13 @@ class TestTransformers:
             c.enc.num_block,
             c.enc.d_ff,
             c.enc.use_bias,
+            enc_pad_token,
             c.dec.dropout,
             c.dec.num_heads,
             c.dec.num_block,
             c.dec.d_ff,
             c.dec.use_bias,
+            dec_pad_token,
         )
 
     def test_shapes(self):

@@ -9,10 +9,12 @@ import argparse
 from typing import Tuple
 
 import torch
+import torch.nn.functional as F
 from torch.cuda.amp.grad_scaler import GradScaler
+from torch.nn import CrossEntropyLoss
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-from torchsummary import summary
+from torchinfo import summary
 from tqdm import tqdm
 
 from dataset_loader import DataloaderHelper
@@ -28,29 +30,12 @@ from misc.utils import (
     load_module,
     to_device,
 )
-from model.enc_dec_transformers import TransformerEncoderDecoder
+from model.enc_dec_transformer import TransformerEncoderDecoder
 
 
 class Trainer:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.transformer = TransformerEncoderDecoder(
-            cfg.enc.vocab_size,
-            cfg.dec.vocab_size,
-            cfg.d_model,
-            cfg.max_len,
-            cfg.pos_dropout,
-            cfg.enc.dropout,
-            cfg.enc.num_heads,
-            cfg.enc.num_block,
-            cfg.enc.d_ff,
-            cfg.enc.use_bias,
-            cfg.dec.dropout,
-            cfg.dec.num_heads,
-            cfg.dec.num_block,
-            cfg.dec.d_ff,
-            cfg.dec.use_bias,
-        )
 
         self.train_dataloader = DataloaderHelper(
             cfg.tokenizer_path_en,
@@ -64,26 +49,54 @@ class Trainer:
             cfg.tokenizer_path_de,
             cfg.train_cfg.batch_size,
             cfg.train_cfg.seq_len,
-            "train",
+            "valid",
         )
         self.test_dataloader = DataloaderHelper(
             cfg.tokenizer_path_en,
             cfg.tokenizer_path_de,
             cfg.train_cfg.batch_size,
             cfg.train_cfg.seq_len,
-            "train",
+            "test",
         )
+        self.enc_pad_token = self.train_dataloader.tokenizer_de.token_to_id("[PAD]")
+        self.dec_pad_token = self.train_dataloader.tokenizer_en.token_to_id("[PAD]")
 
-        self.lr_scheduler = get_lr_scheduler(self.cfg.train_cfg.lr_scheduler)
-        self.exp_path = get_exp_path(cfg.train_cfg.train_data_path)
-        self.logger = get_logger(self.exp_path)
-        self.ckpt_dir = get_ckpt_dir(self.exp_path)
-        self.ckpt_handler = CheckpointHandler(self.ckpt_dir, "model", max_to_keep=3)
+        self.transformer = TransformerEncoderDecoder(
+            cfg.enc.vocab_size,
+            cfg.dec.vocab_size,
+            cfg.d_model,
+            cfg.max_len,
+            cfg.pos_dropout,
+            cfg.enc.dropout,
+            cfg.enc.num_heads,
+            cfg.enc.num_block,
+            cfg.enc.d_ff,
+            cfg.enc.use_bias,
+            self.enc_pad_token,
+            cfg.dec.dropout,
+            cfg.dec.num_heads,
+            cfg.dec.num_block,
+            cfg.dec.d_ff,
+            cfg.dec.use_bias,
+            self.dec_pad_token,
+        )
 
         self.epochs = self.cfg.train_cfg.epochs
 
         self.cpu = torch.device("cpu:0")
         self.cuda = torch.device("cuda:0")
+
+        self.lr_scheduler = get_lr_scheduler(
+            self.cfg.train_cfg.lr_scheduler,
+            init_lr=self.cfg.train_cfg.init_lr,
+            epochs=self.epochs,
+            burn_in_epochs=self.cfg.train_cfg.burn_in_epochs,
+            steps_per_epoch=len(self.train_dataloader.get_iterator()),
+        )
+        self.exp_path = get_exp_path(cfg.train_cfg.train_data_path)
+        self.logger = get_logger(self.exp_path)
+        self.ckpt_dir = get_ckpt_dir(self.exp_path)
+        self.ckpt_handler = CheckpointHandler(self.ckpt_dir, "model", max_to_keep=3)
 
     def __print_model_summary(self) -> None:
         """Function to print the model's summary.
@@ -93,17 +106,41 @@ class Trainer:
         # dst_tokens: [batch, seq_len]
         # src_mask  : [batch, 1, 1, seq_len]
         # dst_mask  : [batch, 1, seq_len, seq_len]
+        valid_iter = self.valid_dataloader.get_iterator()
+        src_tokens, dst_tokens, src_mask, dst_mask, dst_labels = next(iter(valid_iter))
         model_stats = summary(
-            self.transformer, [(1, 128), (1, 64), (1, 1, 1, 128), (1, 1, 64, 128)]
+            self.transformer, input_data=[src_tokens, dst_tokens, src_mask, dst_mask]
         )
         for line in str(model_stats).split("\n"):
             self.logger.debug(line)
 
+    def __compute_loss_and_accuracy(
+        self, logits: torch.Tensor, labels: torch.Tensor, loss_fn: CrossEntropyLoss
+    ) -> Tuple[torch.Tensor]:
+        """Function to compute loss value and accuracy value based on the logits
+        and labels.
+
+        Args:
+            logits (torch.Tensor): Logits from model in shape [b x seq x vocab].
+            labels (torch.Tensor): Labels from dataloader in shape [b x seq].
+            loss_fn (CrossEntropyLoss): Cross entropy loss function instance.
+
+        Returns:
+            Tuple[torch.Tensor]: Tuple of calculated loss and accuracy value.
+        """
+        loss = loss_fn(logits, labels)
+        probs = F.softmax(logits.detach(), dim=-1)
+
+        batch_size = labels.shape[0]
+        acc = (torch.argmax(probs, dim=-1) == labels).sum() * 100 / batch_size
+        return loss, acc
+
     def __train_batch_loop(
         self,
         iterator: DataLoader,
+        loss_fn: CrossEntropyLoss,
         opt: Optimizer,
-        scalar: GradScaler,
+        scaler: GradScaler,
         summ_writer: SummaryHelper,
         eps: int,
     ) -> None:
@@ -112,8 +149,9 @@ class Trainer:
 
         Args:
             iterator (DataLoader): Training dataloader.
+            loss_fn (CrossEntropyLoss): Cross entropy loss function instance.
             opt (Optimizer): Optimizer instance.
-            scalar (GradScaler): Gradient scalar instance.
+            scaler (GradScaler): Gradient scaler instance.
             summ_writer (SummaryHelper): Summary object to store data for
                 tensorboard visualization.
             eps (int): Epoch number.
@@ -136,15 +174,17 @@ class Trainer:
 
             opt.zero_grad()
             with torch.cuda.amp.autocast(enabled=self.cfg.train_cfg.use_amp):
-                src_tokens, dst_tokens, src_mask, dst_mask = to_device(
+                src_tokens, dst_tokens, src_mask, dst_mask, dst_labels = to_device(
                     [src_tokens, dst_tokens, src_mask, dst_mask, dst_labels], self.cuda
                 )
                 logits = self.transformer(src_tokens, dst_tokens, src_mask, dst_mask)
-                loss, acc = self.compute_loss_and_accuracy(logits, dst_labels)
+                loss, acc = self.__compute_loss_and_accuracy(
+                    logits, dst_labels, loss_fn
+                )
 
-            scalar.scale(loss).backward()
-            scalar.step(opt)
-            scalar.update()
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
 
             lr = self.lr_scheduler.step(g_step, opt)
             opt.step()
@@ -166,15 +206,19 @@ class Trainer:
                 )
 
     def __test_batch_loop(
-        self, iterator: DataLoader, summ_writer: SummaryHelper, eps: int, g_step: int
+        self,
+        iterator: DataLoader,
+        loss_fn: CrossEntropyLoss,
+        summ_writer: SummaryHelper,
+        g_step: int,
     ) -> Tuple[float]:
         """Function to run the test loop at the end of each epoch.
 
         Args:
             iterator (DataLoader): Test dataloader.
+            loss_fn (CrossEntropyLoss): Cross entropy loss function instance.
             summ_writer (SummaryHelper): Summary object to store data for
                 tensorboard visualization.
-            eps (int): Epoch number.
             g_step (int): Total iteration number.
 
         Returns:
@@ -195,11 +239,13 @@ class Trainer:
                 # dst_mask  : [batch, 1, seq_len, seq_len]
                 # dst_labels: [batch, seq_len]
 
-                src_tokens, dst_tokens, src_mask, dst_mask = to_device(
+                src_tokens, dst_tokens, src_mask, dst_mask, dst_labels = to_device(
                     [src_tokens, dst_tokens, src_mask, dst_mask, dst_labels], self.cuda
                 )
                 logits = self.transformer(src_tokens, dst_tokens, src_mask, dst_mask)
-                loss, acc = self.compute_loss_and_accuracy(logits, dst_labels)
+                loss, acc = self.__compute_loss_and_accuracy(
+                    logits, dst_labels, loss_fn
+                )
                 test_tracker([loss, acc])
 
             avg_test_loss, avg_test_acc = test_tracker.get_averages()
@@ -228,17 +274,17 @@ class Trainer:
         return SummaryHelper(summ_path)
 
     def __save_checkpoint(
-        self, eps: int, g_step: int, loss: float, opt: Optimizer, scalar: GradScaler
+        self, eps: int, g_step: int, loss: float, opt: Optimizer, scaler: GradScaler
     ) -> None:
         """Function to save the checkpoint along with model state, optimizer
-        state, scalar state and other attributes corresponding to current epoch.
+        state, scaler state and other attributes corresponding to current epoch.
 
         Args:
             eps (int): Epoch number.
             g_step (int): Total iteration number.
             loss (float): Test Loss value
             opt (Optimizer): Optimizer instance.
-            scalar (GradScaler): Gradient scalar instance.
+            scaler (GradScaler): Gradient scaler instance.
         """
         checkpoint = {
             "epoch": eps,
@@ -246,12 +292,12 @@ class Trainer:
             "test_loss": loss,
             "model": self.transformer.state_dict(),
             "optimizer": opt.state_dict(),
-            "scalar": scalar.state_dict(),
+            "scaler": scaler.state_dict(),
         }
         self.ckpt_handler.save(checkpoint)
 
     def __resume_training(
-        self, resume: bool, resume_ckpt: str, opt: Optimizer, scalar: GradScaler
+        self, resume: bool, resume_ckpt: str, opt: Optimizer, scaler: GradScaler
     ) -> Tuple[int]:
         """Function to restore the training parameters and return resume epoch
         number and global iteration number.
@@ -260,7 +306,7 @@ class Trainer:
             resume (bool): True for resuming the training else False.
             resume_ckpt (str): Path of resume checkpoint to be restored.
             opt (Optimizer): Optimizer instance.
-            scalar (GradScaler): Gradient Scalar instance.
+            scaler (GradScaler): Gradient scaler instance.
 
         Returns:
             Tuple[int]: Tuple of resume epoch number and global iteration count.
@@ -269,7 +315,7 @@ class Trainer:
             checkpoint = torch.load(resume_ckpt)
             self.transformer.load_state_dict(checkpoint["model"])
             opt.load_state_dict(checkpoint["optimizer"])
-            scalar.load_state_dict(checkpoint["scalar"])
+            scaler.load_state_dict(checkpoint["scaler"])
             resume_g_step = checkpoint["global_step"]
             resume_eps = checkpoint["epoch"]
             self.logger.info(f"Resuming training from {resume_eps} epochs.")
@@ -280,8 +326,16 @@ class Trainer:
         g_step = max(1, resume_g_step)
         return resume_eps, g_step
 
-    def __get_loss_function(self):
-        return None
+    def __get_loss_function(self) -> CrossEntropyLoss:
+        """Function to get the cross entropy loss function instance.
+
+        Returns:
+            CrossEntropyLoss: Instance of cross entropy loss.
+        """
+        return CrossEntropyLoss(
+            label_smoothing=self.cfg.train_cfg.label_smoothing,
+            ignore_index=self.dec_pad_token,
+        )
 
     def train(self, resume: bool = False, resume_ckpt: str = None) -> None:
         """Function to be used to train the model based on provided config.
@@ -297,26 +351,27 @@ class Trainer:
         loss_fn = self.__get_loss_function()
 
         opt = torch.optim.Adam(self.transformer.parameters(), lr=0.0, weight_decay=0.0)
-        scalar = torch.cuda.amp.GradScaler(enabled=self.cfg.train_cfg.use_amp)
+        scaler = torch.cuda.amp.GradScaler(enabled=self.cfg.train_cfg.use_amp)
 
-        resume_eps, g_step = self.__resume_training(resume, resume_ckpt, opt, scalar)
+        resume_eps, g_step = self.__resume_training(resume, resume_ckpt, opt, scaler)
 
         train_writer = self.__get_summary_writer("train")
         test_writer = self.__get_summary_writer("test")
 
+        self.transformer.to(self.cuda)
         for eps in range(resume_eps, self.epochs + 1):
             train_iter = self.train_dataloader.get_iterator()
             # valid_iter = self.valid_dataloader.get_iterator()
             self.logger.info(f"Epoch: {eps}/{self.epochs} Started")
-            self.__train_batch_loop(train_iter, opt, scalar, train_writer, eps)
+            self.__train_batch_loop(train_iter, loss_fn, opt, scaler, train_writer, eps)
 
             g_step = eps * len(train_iter)
             test_iter = self.test_dataloader.get_iterator()
             avg_test_loss, avg_test_acc = self.__test_batch_loop(
-                test_iter, test_writer, eps, g_step
+                test_iter, loss_fn, test_writer, eps, g_step
             )
 
-            self.__save_checkpoint(eps, g_step, avg_test_loss, opt, scalar)
+            self.__save_checkpoint(eps, g_step, avg_test_loss, opt, scaler)
             self.logger.info(f"Epoch: {eps}/{self.epochs} completed")
 
         print("Training Completed.")

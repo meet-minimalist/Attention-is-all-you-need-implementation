@@ -22,13 +22,14 @@ class Embeddings(nn.Module):
         super().__init__()
         self.vocab_size = vocab_size
         self.emb_dims = emb_dims
+        self.emb_scalar = torch.Tensor([np.sqrt(self.emb_dims)]).to(torch.float32)
         self.emb_layer = nn.Embedding(self.vocab_size, self.emb_dims)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # input     : [batch, seq_len]
         # output    : [batch, seq_len, emb_size]
 
-        embeddings = self.emb_layer(x) * np.sqrt(
-            self.emb_dims
+        embeddings = self.emb_layer(x) * self.emb_scalar.to(
+            x.device
         )  # [batch, seq_len, emb_size]
         return embeddings

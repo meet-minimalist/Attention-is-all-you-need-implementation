@@ -5,9 +5,10 @@
 # @copyright MIT License
 #
 
+from __future__ import annotations
+
 import logging
 import os
-import sys
 
 
 class Logger:
@@ -15,7 +16,7 @@ class Logger:
     _log_level_mapping = {"INFO": logging.INFO, "DEBUG": logging.DEBUG}
 
     def __new__(
-        cls, log_path: str = None, log_level: str = "INFO", *args, **kwargs
+        cls, log_path: str = None, log_level: str = "DEBUG", *args, **kwargs
     ) -> Logger:
         """Function to be called while creating the instance of this class.
 
@@ -29,27 +30,27 @@ class Logger:
         if not cls._instance:
             cls._instance = super().__new__(cls, *args, **kwargs)
             cls._instance = logging.getLogger("logger")
-            cls._instance.setLevel(cls._log_level_mapping.get(log_level))
-            formatter = logging.Formatter(
-                "%(asctime)s [%(levelname)s \t| %(filename)s:%(lineno)s] > %(message)s",
-                datefmt="%d-%B-%Y %H:%M:%S",
-            )
 
-            if log_path is None:
-                print("Log path is not provided.")
-            else:
-                if not os.path.isdir(log_path):
-                    os.mkdir(log_path)
+        cls._instance.setLevel(cls._log_level_mapping.get(log_level))
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s \t| %(filename)s:%(lineno)s] > %(message)s",
+            datefmt="%d-%B-%Y %H:%M:%S",
+        )
 
-                cls._logger_path = os.path.join(log_path, "training_logs.txt")
-                fileHandler = logging.FileHandler(cls._logger_path)
-                fileHandler.setFormatter(formatter)
+        if log_path is None:
+            print("Log path is not provided.")
+        else:
+            if not os.path.isdir(log_path):
+                os.mkdir(log_path)
 
-            streamHandler = logging.StreamHandler()
-            streamHandler.setFormatter(formatter)
+            cls._logger_path = os.path.join(log_path, "training_logs.txt")
+            file_handler = logging.FileHandler(cls._logger_path)
+            file_handler.setFormatter(formatter)
+            cls._instance.addHandler(file_handler)
 
-            cls._instance.addHandler(fileHandler)
-            cls._instance.addHandler(streamHandler)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        cls._instance.addHandler(stream_handler)
 
         return cls._instance
 

@@ -8,18 +8,75 @@
 import argparse
 import os
 import tempfile
+from typing import Tuple
 
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
+from torch.utils.data.datapipes.iter.sharding import ShardingFilterIterDataPipe
 from torchtext.datasets import IWSLT2016
 from tqdm import tqdm
 
 
+def get_tokenizers_and_trainers(vocab_size_eng: int, vocab_size_ger: int) -> Tuple:
+    """Function to get the english tokenizer and german tokenizer.
+
+    Args:
+        vocab_size_eng (int): Vocab size for english corpus.
+        vocab_size_ger (int): Vocab size for german corpus.
+
+    Returns:
+        Tuple: Tuple of English tokenizer, German tokenizer, english tokenizer
+            trainer and german tokenizer trainer.
+    """
+    tokenizer_en = Tokenizer(BPE(unk_token="[UNK]"))
+    tokenizer_de = Tokenizer(BPE(unk_token="[UNK]"))
+    trainer_en = BpeTrainer(
+        vocab_size=vocab_size_eng,
+        special_tokens=["[PAD]", "[UNK]", "[SOS]", "[EOS]"],
+    )
+    trainer_de = BpeTrainer(
+        vocab_size=vocab_size_ger,
+        special_tokens=["[PAD]", "[UNK]", "[SOS]", "[EOS]"],
+    )
+    tokenizer_en.pre_tokenizer = Whitespace()
+    tokenizer_de.pre_tokenizer = Whitespace()
+    return tokenizer_en, tokenizer_de, trainer_en, trainer_de
+
+
+def get_dataset_iterators() -> Tuple[ShardingFilterIterDataPipe]:
+    """Function to get the training iterators for IWSLT2016 dataset.
+
+    Returns:
+        Tuple[ShardingFilterIterDataPipe]: Tuple of train, validation and test
+            iterators.
+    """
+    train_iter, valid_iter, test_iter = IWSLT2016(
+        root="./", language_pair=("de", "en"), valid_set="tst2013", test_set="tst2014"
+    )
+    return train_iter, valid_iter, test_iter
+
+
 def train_tokenizer(
-    iterators, tokenizer_en, tokenizer_de, trainer_en, trainer_de, tokenizer_op_dir
-):
+    iterators: Tuple[ShardingFilterIterDataPipe],
+    tokenizer_en: Tokenizer,
+    tokenizer_de: Tokenizer,
+    trainer_en: BpeTrainer,
+    trainer_de: BpeTrainer,
+    tokenizer_op_dir: str,
+) -> None:
+    """Function to train the tokenizer and save it on disk.
+
+    Args:
+        iterators (Tuple[ShardingFilterIterDataPipe]): Tuple of dataset
+            iterators. It can contain train, valid and test split of dataset.
+        tokenizer_en (Tokenizer): English tokenizer instance.
+        tokenizer_de (Tokenizer): German tokenizer instance.
+        trainer_en (BpeTrainer): English tokenizer trainer instance.
+        trainer_de (BpeTrainer): German tokenizer trainer instance.
+        tokenizer_op_dir (str): Tokenizer save directory.
+    """
     with tempfile.TemporaryDirectory() as temp_dir:
         tokenizer_paths_en = []
         tokenizer_paths_de = []
@@ -73,23 +130,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    tokenizer_en = Tokenizer(BPE(unk_token="[UNK]"))
-    tokenizer_de = Tokenizer(BPE(unk_token="[UNK]"))
-    trainer_en = BpeTrainer(
-        vocab_size=args.vocab_size_eng,
-        special_tokens=["[PAD]", "[UNK]", "[SOS]", "[EOS]"],
+    tokenizer_en, tokenizer_de, trainer_en, trainer_de = get_tokenizers_and_trainers(
+        args.vocab_size_eng, args.vocab_size_ger
     )
-    trainer_de = BpeTrainer(
-        vocab_size=args.vocab_size_ger,
-        special_tokens=["[PAD]", "[UNK]", "[SOS]", "[EOS]"],
-    )
-    tokenizer_en.pre_tokenizer = Whitespace()
-    tokenizer_de.pre_tokenizer = Whitespace()
 
-    train_iter, valid_iter, test_iter = IWSLT2016(
-        root="./", language_pair=("de", "en"), valid_set="tst2013", test_set="tst2014"
-    )
-    iterators = train_iter, valid_iter, test_iter
+    iterators = get_dataset_iterators()
 
     train_tokenizer(
         iterators,

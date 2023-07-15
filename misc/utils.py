@@ -80,7 +80,7 @@ def get_summary_path(exp_path: str, type: str = "train") -> str:
         str: Summary directory path.
     """
     summ_path = os.path.join(exp_path, type)
-    os.makedirs(summ_path, exists_ok=True)
+    os.makedirs(summ_path, exist_ok=True)
     return summ_path
 
 
@@ -128,21 +128,23 @@ def to_device(
     return tensors
 
 
-def load_module(module_path: str) -> Union[object, None]:
+def load_module(module_path: str):
     """Function to load module from a given path.
 
     Args:
         module_path (str): Path of the module or python file to be imported.
 
     Returns:
-        Union[object, None]: Upon successful import of module the imported object
-            is returned, else None is returned.
+        Upon successful import of module the imported object is returned,
+            else None is returned.
     """
-    import pdb
-
-    pdb.set_trace()
     try:
-        module = importlib.import_module(module_path)
+        if not os.path.isfile(module_path):
+            print("Module not found.")
+            raise FileNotFoundError
+        module_name = os.path.splitext(os.path.basename(module_path))[0]
+        dir_name = os.path.dirname(module_path)
+        module = importlib.import_module(module_name, package=dir_name)
         return module
     except ImportError:
         return None

@@ -48,6 +48,7 @@ class MultiHeadAttention(nn.Module):
         drop_prob: float = 0.1,
         num_heads: int = 8,
         bias: bool = True,
+        pad_token: int = 0,
     ):
         """Initializer for multi head attention block.
 
@@ -61,12 +62,15 @@ class MultiHeadAttention(nn.Module):
             num_heads (int, optional): Number of parallel heads in Multi head
                 attention block. Defaults to 8.
             bias (bool, optional): Use bias for all the layers. Defaults to True.
+            pad_token (int, optional): Pad token to be used for masked softmax.
+                Defaults to 0.
         """
         super().__init__()
         self.num_heads = num_heads
         self.d_k = d_k
         self.d_model = d_model
         self.drop_prob = drop_prob
+        self.pad_token = pad_token
 
         self.query = PrepareaForMultiHeadAttention(
             self.d_model, self.num_heads, bias=bias
@@ -82,10 +86,12 @@ class MultiHeadAttention(nn.Module):
         self.dropout_layer = nn.Dropout(drop_prob)
         self.softmax = nn.Softmax(dim=-1)
 
-        self.scale = 1 / np.sqrt(self.d_model)
+        self.scale = torch.Tensor([1 / np.sqrt(self.d_model)]).to(torch.float32)
 
     def __get_mask_q_k(
-        self, q_k: torch.Tensor, mask: torch.Tensor = None
+        self,
+        q_k: torch.Tensor,
+        mask: torch.Tensor,
     ) -> torch.Tensor:
         """Function to get the mask to be used before softmax such that only the
         tokens before the current token gets attended by current token.
@@ -93,46 +99,50 @@ class MultiHeadAttention(nn.Module):
         Args:
             q_k (torch.Tensor): Tensor generated after matmul of Q and K.
             mask (torch.Tensor): Mask to be used to computed masked_q_k.
-                Defaults to None.
 
         Returns:
             torch.Tensor: Masked tensor output.
         """
         # q_k : [batch, num_heads, seq_len_q, seq_len_k]
-        # mask: [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
-        if mask is None:
-            mask = torch.tril(q_k)
+        # mask: [batch, 1, 1, seq_len] for encoder (self attention)
+        #     : [batch, 1, 1, seq_len] for decoder (cross attention)
+        #     : [batch, 1, seq_len, seq_len] for decoder (masked self attention)
 
-        masked_q_k = q_k.masked_fill(mask == 0, float("-inf"))
+        masked_q_k = q_k.masked_fill(mask == self.pad_token, float("-inf"))
         return masked_q_k
 
     def forward(
-        self, x: torch.Tensor, y: torch.Tensor = None, mask: torch.Tensor = None
+        self,
+        q_vec: torch.Tensor,
+        k_vec: torch.Tensor,
+        v_vec: torch.Tensor,
+        mask: torch.Tensor,
     ) -> torch.Tensor:
-        # x         : [batch, seq_len, emb_size]
-        # y         : [batch, num_heads, seq_len, seq_len]. Optional parameter.
-        #           : If this is provided then use it for cross attention.
-        #           : i.e. Q and K vectors are generated using x which is encoder
-        #           : representation and V vector is generated using y which is
-        #           : decoder representation. In this case the mask shall be of
-        #           : encoder mask as we need mask only for Q and K.
-        # mask      : [batch, 1, 1, seq_len] for encoder or [batch, 1, seq_len, seq_len] for decoder
+        # q_vec     : Query vector. [batch, seq_len, emb_size]
+        #           : - For encoder, query vector is same as key vector and value
+        #           :   vector. All 3 come from same input tensor.
+        #           : - For decoder, in self attention just like encoder all 3
+        #           :   q, k and v will be same.
+        #           : - For decoder, in cross attention the q vector come from
+        #           :   encoder output and k and v come from decoder representation.
+        # k_vec     : Key vector.   [batch, seq_len, emb_size]
+        # v_vec     : Value vector. [batch, seq_len, emb_size]
+        # mask      : - For encoder self attention mask : [batch, 1, 1, seq_len]
+        #           : - For decoder self attention mask : [batch, 1, seq_len, seq_len]
+        #           : - For decoder cross attention mask: [batch, 1, 1, seq_len]
         # output    : [batch, seq_len, emb_size]
 
         # seq_len_q = seq_len_k = seq_len_v
         # The representation will be different. Dimensions will be same.
-        q = self.query(x)  # [batch, seq_len_q, num_heads, d_k]
-        k = self.key(x)  # [batch, seq_len_k, num_heads, d_k]
-        if y is None:
-            v = self.value(x)  # [batch, seq_len_v, num_heads, d_v]
-        else:
-            v = self.value(y)  # [batch, seq_len_v, num_heads, d_v]
+        q = self.query(q_vec)  # [batch, seq_len_q, num_heads, d_k]
+        k = self.key(k_vec)  # [batch, seq_len_k, num_heads, d_k]
+        v = self.value(v_vec)  # [batch, seq_len_v, num_heads, d_v]
 
         q = q.permute(0, 2, 1, 3)  # [batch, num_heads, seq_len_q, d_k]
         k = k.permute(0, 2, 3, 1)  # [batch, num_heads, d_k, seq_len_k]
 
         q_kT = q @ k  # [batch, num_heads, seq_len_q, seq_len_k]
-        q_kT_scaled = q_kT * self.scale
+        q_kT_scaled = q_kT * self.scale.to(q_kT.device)
 
         # We dont want to find attention for all the elements seq_len_q with all
         # the elements of seq_len_k. The token_idx i from q should only attend
