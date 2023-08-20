@@ -54,7 +54,9 @@ class SummaryHelper:
             elif isinstance(value, torch.Tensor):
                 # For Torch tensors
                 if len(value.shape) == 0:
-                    self.summary_writer.add_scalar(key, value.detach().numpy(), g_step)
+                    self.summary_writer.add_scalar(
+                        key, value.detach().cpu().numpy(), g_step
+                    )
                 else:
                     raise NotImplementedError(
                         "Summary for tensors of more than 1 dims are not supported."

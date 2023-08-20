@@ -253,7 +253,7 @@ class Trainer:
         self.transformer.eval()
 
         # Only test_loss and accuracy to be tracked.
-        test_tracker = LossAverager(num_elements=5)
+        test_tracker = LossAverager(num_elements=2)
 
         with torch.no_grad():
             for src_tokens, dst_tokens, src_mask, dst_mask, dst_labels in tqdm(
@@ -386,7 +386,7 @@ class Trainer:
         test_writer = self.__get_summary_writer("test")
 
         self.transformer.to(self.cuda)
-        for eps in range(resume_eps, self.epochs + 1):
+        for eps in range(resume_eps, self.epochs):
             train_iter = self.train_dataloader.get_iterator()
             # valid_iter = self.valid_dataloader.get_iterator()
             self.logger.info(f"Epoch: {eps + 1}/{self.epochs} Started")
