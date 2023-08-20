@@ -35,7 +35,7 @@ class Logger:
         if not cls._instance:
             cls._instance = super().__new__(cls, *args, **kwargs)
             cls._instance = logging.getLogger("logger")
-            
+
             stream_handler = logging.StreamHandler()
             stream_handler.setFormatter(cls._formatter)
             cls._instance.addHandler(stream_handler)

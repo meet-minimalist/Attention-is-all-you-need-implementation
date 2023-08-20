@@ -8,15 +8,15 @@
 import argparse
 import os
 import tempfile
-from typing import Tuple, List
+from typing import List, Tuple
 
+import datasets
+from datasets import load_dataset
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
 from tqdm import tqdm
-import datasets
-from datasets import load_dataset
 
 
 def get_tokenizers_and_trainers(vocab_size_eng: int, vocab_size_ger: int) -> Tuple:
@@ -45,7 +45,7 @@ def get_tokenizers_and_trainers(vocab_size_eng: int, vocab_size_ger: int) -> Tup
     return tokenizer_en, tokenizer_de, trainer_en, trainer_de
 
 
-def get_dataset_iterators(split: str="train") -> datasets.Dataset:
+def get_dataset_iterators(split: str = "train") -> datasets.Dataset:
     """Function to get the training iterators for IWSLT2016 dataset.
 
     Args:
@@ -53,7 +53,7 @@ def get_dataset_iterators(split: str="train") -> datasets.Dataset:
     Returns:
         datasets.Dataset: Dataset iterator based on given split.
     """
-    dataset_iterator = load_dataset('iwslt2017', "iwslt2017-de-en", split=split)
+    dataset_iterator = load_dataset("iwslt2017", "iwslt2017-de-en", split=split)
     return dataset_iterator
 
 
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     train_iterators = get_dataset_iterators("train")
     validation_iterators = get_dataset_iterators("validation")
     all_iterators = [train_iterators, validation_iterators]
-    
+
     train_tokenizer(
         all_iterators,
         tokenizer_en,

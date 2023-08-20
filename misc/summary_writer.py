@@ -5,7 +5,7 @@
 # @copyright MIT License
 #
 
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
@@ -56,7 +56,9 @@ class SummaryHelper:
                 if len(value.shape) == 0:
                     self.summary_writer.add_scalar(key, value.detach().numpy(), g_step)
                 else:
-                    raise NotImplementedError("Summary for tensors of more than 1 dims are not supported.")
+                    raise NotImplementedError(
+                        "Summary for tensors of more than 1 dims are not supported."
+                    )
             else:
                 print("Summary Input not identified", type(value))
 

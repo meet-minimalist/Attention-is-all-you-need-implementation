@@ -5,8 +5,8 @@
 # @copyright MIT License
 #
 
-import sys
 import argparse
+import sys
 from typing import Tuple
 
 import torch
@@ -110,13 +110,18 @@ class Trainer:
         valid_iter = self.valid_dataloader.get_iterator()
         src_tokens, dst_tokens, src_mask, dst_mask, dst_labels = next(iter(valid_iter))
         model_stats = summary(
-            self.transformer, input_data=[src_tokens, dst_tokens, src_mask, dst_mask], verbose=0,
+            self.transformer,
+            input_data=[src_tokens, dst_tokens, src_mask, dst_mask],
+            verbose=0,
         )
         for line in str(model_stats).split("\n"):
             self.logger.debug(line)
 
     def __compute_loss_and_accuracy(
-        self, logits: torch.Tensor, labels: torch.Tensor, loss_fn: CrossEntropyLoss,
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        loss_fn: CrossEntropyLoss,
     ) -> Tuple[torch.Tensor]:
         """Function to compute loss value and accuracy value based on the logits
         and labels.
@@ -134,21 +139,25 @@ class Trainer:
         batch_size = logits.shape[0]
         seq_len = logits.shape[1]
         vocab_size = logits.shape[-1]
-        
+
         logits = logits.view(-1, vocab_size)
         labels = labels.view(-1)
-        
+
         # We would sum across each sequence length and average across all batches.
         loss = loss_fn(logits, labels) / batch_size
 
         probs = F.softmax(logits.detach(), dim=-1)
 
         # We need to ignore pad tokens.
-        label_mask = (labels != self.dec_pad_token)
-        
+        label_mask = labels != self.dec_pad_token
+
         # We would mean across all sequence lengths and all batches.
-        acc = ((torch.argmax(probs, dim=-1) == labels) * label_mask).sum() * 100 / (batch_size * seq_len)
-        
+        acc = (
+            ((torch.argmax(probs, dim=-1) == labels) * label_mask).sum()
+            * 100
+            / (batch_size * seq_len)
+        )
+
         return loss, acc
 
     def __train_batch_loop(

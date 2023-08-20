@@ -47,6 +47,11 @@ class CosineAnnealing(LearningRateScheduler):
             lr = (self.init_lr) * (g_step / self.burn_in_steps)  # Linear Scaling
             return lr
         else:
-            return self.init_lr * 0.5 * (
-                1 + np.cos(np.pi * (g_step - self.burn_in_steps) / self.cosine_iters)
+            return (
+                self.init_lr
+                * 0.5
+                * (
+                    1
+                    + np.cos(np.pi * (g_step - self.burn_in_steps) / self.cosine_iters)
+                )
             )

@@ -8,12 +8,12 @@
 import random
 from typing import List, Tuple
 
+import datasets
 import torch
+from datasets import load_dataset
 from tokenizers import Tokenizer
 from tokenizers.processors import TemplateProcessing
 from torch.utils.data import DataLoader, Sampler
-import datasets
-from datasets import load_dataset
 
 from model.utils import get_src_pad_mask, get_trg_pad_mask
 
@@ -143,7 +143,9 @@ class DataloaderHelper:
         """
         self.batch_size = batch_size
         self.seq_len = seq_len
-        self.dataset_iterator = load_dataset('iwslt2017', "iwslt2017-de-en", split=split)
+        self.dataset_iterator = load_dataset(
+            "iwslt2017", "iwslt2017-de-en", split=split
+        )
         self.tokenizer_en = load_tokenizer(tokenizer_path_en)
         self.tokenizer_de = load_tokenizer(tokenizer_path_de)
 
