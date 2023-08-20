@@ -8,15 +8,15 @@
 import argparse
 import os
 import tempfile
-from typing import Tuple
+from typing import Tuple, List
 
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
-from torch.utils.data.datapipes.iter.sharding import ShardingFilterIterDataPipe
-from torchtext.datasets import IWSLT2016
 from tqdm import tqdm
+import datasets
+from datasets import load_dataset
 
 
 def get_tokenizers_and_trainers(vocab_size_eng: int, vocab_size_ger: int) -> Tuple:
@@ -45,21 +45,20 @@ def get_tokenizers_and_trainers(vocab_size_eng: int, vocab_size_ger: int) -> Tup
     return tokenizer_en, tokenizer_de, trainer_en, trainer_de
 
 
-def get_dataset_iterators() -> Tuple[ShardingFilterIterDataPipe]:
+def get_dataset_iterators(split: str="train") -> datasets.Dataset:
     """Function to get the training iterators for IWSLT2016 dataset.
 
+    Args:
+        split (str, optional): Type of dataset split to be obtained. Defaults to "train".
     Returns:
-        Tuple[ShardingFilterIterDataPipe]: Tuple of train, validation and test
-            iterators.
+        datasets.Dataset: Dataset iterator based on given split.
     """
-    train_iter, valid_iter, test_iter = IWSLT2016(
-        root="./", language_pair=("de", "en"), valid_set="tst2013", test_set="tst2014"
-    )
-    return train_iter, valid_iter, test_iter
+    dataset_iterator = load_dataset('iwslt2017', "iwslt2017-de-en", split=split)
+    return dataset_iterator
 
 
 def train_tokenizer(
-    iterators: Tuple[ShardingFilterIterDataPipe],
+    iterators: List[datasets.Dataset],
     tokenizer_en: Tokenizer,
     tokenizer_de: Tokenizer,
     trainer_en: BpeTrainer,
@@ -69,8 +68,8 @@ def train_tokenizer(
     """Function to train the tokenizer and save it on disk.
 
     Args:
-        iterators (Tuple[ShardingFilterIterDataPipe]): Tuple of dataset
-            iterators. It can contain train, valid and test split of dataset.
+        iterators (List[datasets.Dataset]): List of dataset
+            iterators. It can contain train and valid split of dataset.
         tokenizer_en (Tokenizer): English tokenizer instance.
         tokenizer_de (Tokenizer): German tokenizer instance.
         trainer_en (BpeTrainer): English tokenizer trainer instance.
@@ -90,7 +89,9 @@ def train_tokenizer(
 
             en_lines = []
             de_lines = []
-            for ger_line, eng_line in tqdm(iterator):
+            for data in tqdm(iterator):
+                ger_line = data["translation"]["de"]
+                eng_line = data["translation"]["en"]
                 de_lines.append("[SOS]" + ger_line.rstrip() + "[EOS]")
                 en_lines.append("[SOS]" + eng_line.rstrip() + "[EOS]")
 
@@ -134,10 +135,13 @@ if __name__ == "__main__":
         args.vocab_size_eng, args.vocab_size_ger
     )
 
-    iterators = get_dataset_iterators()
-
+    # Only train and validation datasets are to be used for training tokenizer.
+    train_iterators = get_dataset_iterators("train")
+    validation_iterators = get_dataset_iterators("validation")
+    all_iterators = [train_iterators, validation_iterators]
+    
     train_tokenizer(
-        iterators,
+        all_iterators,
         tokenizer_en,
         tokenizer_de,
         trainer_en,

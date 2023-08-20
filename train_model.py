@@ -5,6 +5,7 @@
 # @copyright MIT License
 #
 
+import sys
 import argparse
 from typing import Tuple
 
@@ -49,7 +50,7 @@ class Trainer:
             cfg.tokenizer_path_de,
             cfg.train_cfg.batch_size,
             cfg.train_cfg.seq_len,
-            "valid",
+            "validation",
         )
         self.test_dataloader = DataloaderHelper(
             cfg.tokenizer_path_en,
@@ -102,20 +103,20 @@ class Trainer:
         """Function to print the model's summary.
         e.g. Each layer's shapes and parameters.
         """
-        # src_tokens: [batch, seq_len]
+        # src_tokens: [batch, se(_len]
         # dst_tokens: [batch, seq_len]
         # src_mask  : [batch, 1, 1, seq_len]
         # dst_mask  : [batch, 1, seq_len, seq_len]
         valid_iter = self.valid_dataloader.get_iterator()
         src_tokens, dst_tokens, src_mask, dst_mask, dst_labels = next(iter(valid_iter))
         model_stats = summary(
-            self.transformer, input_data=[src_tokens, dst_tokens, src_mask, dst_mask]
+            self.transformer, input_data=[src_tokens, dst_tokens, src_mask, dst_mask], verbose=0,
         )
         for line in str(model_stats).split("\n"):
             self.logger.debug(line)
 
     def __compute_loss_and_accuracy(
-        self, logits: torch.Tensor, labels: torch.Tensor, loss_fn: CrossEntropyLoss
+        self, logits: torch.Tensor, labels: torch.Tensor, loss_fn: CrossEntropyLoss,
     ) -> Tuple[torch.Tensor]:
         """Function to compute loss value and accuracy value based on the logits
         and labels.
@@ -128,11 +129,26 @@ class Trainer:
         Returns:
             Tuple[torch.Tensor]: Tuple of calculated loss and accuracy value.
         """
-        loss = loss_fn(logits, labels)
+        # logits: [B, seq, vocab]
+        # labels: [B, seq]
+        batch_size = logits.shape[0]
+        seq_len = logits.shape[1]
+        vocab_size = logits.shape[-1]
+        
+        logits = logits.view(-1, vocab_size)
+        labels = labels.view(-1)
+        
+        # We would sum across each sequence length and average across all batches.
+        loss = loss_fn(logits, labels) / batch_size
+
         probs = F.softmax(logits.detach(), dim=-1)
 
-        batch_size = labels.shape[0]
-        acc = (torch.argmax(probs, dim=-1) == labels).sum() * 100 / batch_size
+        # We need to ignore pad tokens.
+        label_mask = (labels != self.dec_pad_token)
+        
+        # We would mean across all sequence lengths and all batches.
+        acc = ((torch.argmax(probs, dim=-1) == labels) * label_mask).sum() * 100 / (batch_size * seq_len)
+        
         return loss, acc
 
     def __train_batch_loop(
@@ -194,8 +210,8 @@ class Trainer:
                 acc = to_device(acc, self.cpu)
 
                 self.logger.info(
-                    f"Epoch: {eps}/{self.epochs}, "
-                    f"Batch No.: {batch_num}/{len(iterator)}, "
+                    f"Epoch: {eps + 1}/{self.epochs}, "
+                    f"Batch No.: {batch_num + 1}/{len(iterator)}, "
                     f"Loss: {loss:.4f}, "
                     f"Accuracy: {acc:.2f}, "
                     f"LR: {lr:.5f}"
@@ -204,6 +220,7 @@ class Trainer:
                 summ_writer.add_summary(
                     {"loss": loss, "accuracy": acc, "lr": lr}, g_step
                 )
+            g_step += 1
 
     def __test_batch_loop(
         self,
@@ -227,7 +244,7 @@ class Trainer:
         self.transformer.eval()
 
         # Only test_loss and accuracy to be tracked.
-        test_tracker = LossAverager(num_elements=2)
+        test_tracker = LossAverager(num_elements=5)
 
         with torch.no_grad():
             for src_tokens, dst_tokens, src_mask, dst_mask, dst_labels in tqdm(
@@ -321,7 +338,7 @@ class Trainer:
             self.logger.info(f"Resuming training from {resume_eps} epochs.")
         else:
             resume_g_step = 1
-            resume_eps = 1
+            resume_eps = 0
 
         g_step = max(1, resume_g_step)
         return resume_eps, g_step
@@ -333,6 +350,7 @@ class Trainer:
             CrossEntropyLoss: Instance of cross entropy loss.
         """
         return CrossEntropyLoss(
+            reduction="sum",
             label_smoothing=self.cfg.train_cfg.label_smoothing,
             ignore_index=self.dec_pad_token,
         )
@@ -362,17 +380,17 @@ class Trainer:
         for eps in range(resume_eps, self.epochs + 1):
             train_iter = self.train_dataloader.get_iterator()
             # valid_iter = self.valid_dataloader.get_iterator()
-            self.logger.info(f"Epoch: {eps}/{self.epochs} Started")
+            self.logger.info(f"Epoch: {eps + 1}/{self.epochs} Started")
             self.__train_batch_loop(train_iter, loss_fn, opt, scaler, train_writer, eps)
 
             g_step = eps * len(train_iter)
             test_iter = self.test_dataloader.get_iterator()
             avg_test_loss, avg_test_acc = self.__test_batch_loop(
-                test_iter, loss_fn, test_writer, eps, g_step
+                test_iter, loss_fn, test_writer, g_step
             )
 
             self.__save_checkpoint(eps, g_step, avg_test_loss, opt, scaler)
-            self.logger.info(f"Epoch: {eps}/{self.epochs} completed")
+            self.logger.info(f"Epoch: {eps + 1}/{self.epochs} completed")
 
         print("Training Completed.")
         train_writer.close()
@@ -387,6 +405,7 @@ if __name__ == "__main__":
         "--config_path",
         action="store",
         type=str,
+        required=True,
         help="Path of config file to be used for training.",
     )
     args = parser.parse_args()

@@ -5,7 +5,7 @@
 # @copyright MIT License
 #
 
-from typing import Dict, List
+from typing import Dict, List, Any
 
 import numpy as np
 import torch
@@ -35,11 +35,11 @@ class SummaryHelper:
             return
         self.summary_writer.add_graph(model, ip_tensor)
 
-    def add_summary(self, summary_dict: Dict, g_step: int) -> None:
+    def add_summary(self, summary_dict: Dict[str, Any], g_step: int) -> None:
         """Function to add values in tensorboard summary as per given dict.
 
         Args:
-            summary_dict (Dict): Mapping of summary name and its value to store.
+            summary_dict (Dict[str, Any]): Mapping of summary name and its value to store.
             g_step (int): Iteration number for given data.
         """
         if self.is_closed:
@@ -49,8 +49,14 @@ class SummaryHelper:
                 # For scalar values,
                 self.summary_writer.add_scalar(key, value, g_step)
             elif isinstance(value, np.ndarray):
-                # For images,
+                # For images
                 self.summary_writer.add_image(key, value, g_step, dataformats="CHW")
+            elif isinstance(value, torch.Tensor):
+                # For Torch tensors
+                if len(value.shape) == 0:
+                    self.summary_writer.add_scalar(key, value.detach().numpy(), g_step)
+                else:
+                    raise NotImplementedError("Summary for tensors of more than 1 dims are not supported.")
             else:
                 print("Summary Input not identified", type(value))
 

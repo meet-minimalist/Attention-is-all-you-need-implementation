@@ -18,7 +18,7 @@ class EncoderConfig:
     dropout = 0.1
     num_heads = 4
     num_block = 3
-    d_ff = 512
+    d_ff = 256
     use_bias = True
     vocab_size = 30000
 
@@ -28,7 +28,7 @@ class DecoderConfig:
     dropout = 0.1
     num_heads = 4
     num_block = 3
-    d_ff = 512
+    d_ff = 256
     use_bias = True
     vocab_size = 40000
 
@@ -36,7 +36,7 @@ class DecoderConfig:
 @dataclass
 class TrainingConfig:
     batch_size = 2
-    seq_len = 256
+    seq_len = 128
     use_amp = False
     epochs = 10
     train_data_path = "./training_data/"

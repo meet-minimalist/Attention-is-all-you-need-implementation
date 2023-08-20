@@ -29,20 +29,21 @@ class LearningRateScheduler(ABC):
         """
         pass
 
-    def step(self, g_step: int, opt: Optimizer) -> float:
+    def step(self, g_step: int, opt: Optimizer = None) -> float:
         """Function to get the learning rate and set the same to given optimizer.
 
         Args:
             g_step (int): Iteration count.
-            opt (Optimizer): Optimizer instance.
+            opt (Optimizer, Optional): Optimizer instance. Defaults to None.
 
         Returns:
             float: Learning rate value.
         """
         lr = self.get_lr(g_step)
 
-        for grp in opt.param_groups:
-            grp["lr"] = lr
+        if opt:
+            for grp in opt.param_groups:
+                grp["lr"] = lr
 
         return lr
 

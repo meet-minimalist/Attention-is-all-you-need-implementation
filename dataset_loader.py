@@ -12,7 +12,8 @@ import torch
 from tokenizers import Tokenizer
 from tokenizers.processors import TemplateProcessing
 from torch.utils.data import DataLoader, Sampler
-from torchtext.datasets import IWSLT2016
+import datasets
+from datasets import load_dataset
 
 from model.utils import get_src_pad_mask, get_trg_pad_mask
 
@@ -44,7 +45,7 @@ def load_tokenizer(tokenizer_path: str) -> Tokenizer:
 class BatchSamplerSimilarLength(Sampler):
     def __init__(
         self,
-        dataset_iterator: List,
+        dataset_iterator: datasets.Dataset,
         tokenizer_de: str,
         batch_size: int,
         seq_len: int,
@@ -55,8 +56,7 @@ class BatchSamplerSimilarLength(Sampler):
         sequences with similar lengths are grouped together.
 
         Args:
-            dataset_iterator (List): Dataset iterator converted in list form to
-                iterate upon.
+            dataset_iterator (datasets.Dataset): Dataset iterator.
             tokenizer_de (str): Source sequence tokenizer. e.g. German tokenizer.
             batch_size (int): Batch size to be used to compute upper limit of
                 tokens.
@@ -73,8 +73,8 @@ class BatchSamplerSimilarLength(Sampler):
 
         # Considering only german sequences for sorting purposes.
         self.indices = [
-            (i, len(tokenizer_de.encode(src_text).ids))
-            for i, (src_text, tar_text) in enumerate(dataset_iterator)
+            (i, len(tokenizer_de.encode(data["translation"]["de"]).ids))
+            for i, data in enumerate(dataset_iterator)
         ]
 
         if self.shuffle:
@@ -143,14 +143,7 @@ class DataloaderHelper:
         """
         self.batch_size = batch_size
         self.seq_len = seq_len
-        self.dataset_iterator = IWSLT2016(
-            root="./",
-            split=split,
-            language_pair=("de", "en"),
-            valid_set="tst2013",
-            test_set="tst2014",
-        )
-        self.dataset_iterator = list(self.dataset_iterator)
+        self.dataset_iterator = load_dataset('iwslt2017', "iwslt2017-de-en", split=split)
         self.tokenizer_en = load_tokenizer(tokenizer_path_en)
         self.tokenizer_de = load_tokenizer(tokenizer_path_de)
 
@@ -180,7 +173,9 @@ class DataloaderHelper:
         """
         src_tokens, tar_tokens = [], []
         # src is german and tar is english.
-        for src_text, tar_text in batch_data:
+        for data in batch_data:
+            src_text = data["translation"]["de"]
+            tar_text = data["translation"]["en"]
             src_tokens.append(src_text)
             tar_tokens.append(tar_text)
 
@@ -209,10 +204,11 @@ if __name__ == "__main__":
     bs = 8
     max_len = 128
     train_dataloader = DataloaderHelper(
-        tokenizer_path_en, tokenizer_path_de, bs, max_len, "valid"
+        tokenizer_path_en, tokenizer_path_de, bs, max_len, "validation"
     )
     train_iter = train_dataloader.get_iterator()
     print("Dataloaded")
     op = next(iter(train_iter))
-    print(len(op))
+    print("Number of outputs: ", len(op))
+    print("Shape of each outputs: ")
     print([s.shape for s in op])
