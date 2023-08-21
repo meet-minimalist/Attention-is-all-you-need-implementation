@@ -101,6 +101,11 @@ def train_tokenizer(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Help to train Tokenizer.")
     parser.add_argument(
+        "--dataset_type",
+        type=str,
+        help="Type of dataset to be used for tokenization. Available options are 'iwslt2017' and 'wmt14'.",
+    )
+    parser.add_argument(
         "--vocab_size_eng",
         default=30000,
         type=int,
@@ -125,8 +130,8 @@ if __name__ == "__main__":
     )
 
     # Only train and validation datasets are to be used for training tokenizer.
-    train_iterators = get_dataset_iterators("train")
-    validation_iterators = get_dataset_iterators("validation")
+    train_iterators = get_dataset_iterators(args.dataset_type, "train")
+    validation_iterators = get_dataset_iterators(args.dataset_type, "validation")
     all_iterators = [train_iterators, validation_iterators]
 
     train_tokenizer(
