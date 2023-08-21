@@ -103,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_type",
         type=str,
+        required=True,
         help="Type of dataset to be used for tokenization. Available options are 'iwslt2017' and 'wmt14'.",
     )
     parser.add_argument(
