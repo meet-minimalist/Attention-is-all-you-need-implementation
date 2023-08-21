@@ -9,8 +9,8 @@ from dataclasses import dataclass
 d_model = 512
 pos_dropout = 0.1  # Positional Embedding Dropout
 max_len = 3000
-tokenizer_path_en = "./tokenizer_data/bpe_iwslt2016_tokenizer_en.json"
-tokenizer_path_de = "./tokenizer_data/bpe_iwslt2016_tokenizer_de.json"
+tokenizer_path_en = "./tokenizer_data/bpe_tokenizer_en.json"
+tokenizer_path_de = "./tokenizer_data/bpe_tokenizer_de.json"
 
 
 @dataclass
@@ -45,6 +45,7 @@ class TrainingConfig:
     label_smoothing = 0.1
     init_lr = 1e-3
     burn_in_epochs = 2
+    dataset = "wmt"
 
 
 enc = EncoderConfig()

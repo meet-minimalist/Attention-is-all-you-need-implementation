@@ -11,7 +11,9 @@ import logging
 import os
 from typing import List, Union
 
+import datasets
 import torch
+from datasets import load_dataset
 
 from misc.logger import Logger
 from misc.lr_utils.cosine_annealing_lr import CosineAnnealing
@@ -148,6 +150,27 @@ def load_module(module_path: str):
         return module
     except ImportError:
         return None
+
+
+def get_dataset_iterators(
+    dataset_type: str = "iwslt2017", split: str = "train"
+) -> datasets.Dataset:
+    """Function to get the training iterators for IWSLT2016 / WMT14 dataset.
+
+    Args:
+        dataset_type (str, optional): Type of dataset to be used. Defaults to "iwslt2017".
+            Available options are "iwslt2017" and "wmt14"
+        split (str, optional): Type of dataset split to be obtained. Defaults to "train".
+    Returns:
+        datasets.Dataset: Dataset iterator based on given split.
+    """
+    if dataset_type == "iwslt2017":
+        dataset_iterator = load_dataset("iwslt2017", "iwslt2017-de-en", split=split)
+    elif dataset_type == "wmt14":
+        dataset_iterator = load_dataset("wmt14", "de-en", split=split)
+    else:
+        raise NotImplementedError(f"Provided dataset {dataset_type} not supported.")
+    return dataset_iterator
 
 
 class LossAverager:

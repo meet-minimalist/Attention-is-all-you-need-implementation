@@ -10,11 +10,11 @@ from typing import List, Tuple
 
 import datasets
 import torch
-from datasets import load_dataset
 from tokenizers import Tokenizer
 from tokenizers.processors import TemplateProcessing
 from torch.utils.data import DataLoader, Sampler
 
+from misc.utils import get_dataset_iterators
 from model.utils import get_src_pad_mask, get_trg_pad_mask
 
 
@@ -121,6 +121,7 @@ class BatchSamplerSimilarLength(Sampler):
 class DataloaderHelper:
     def __init__(
         self,
+        dataset_type: str,
         tokenizer_path_en: str,
         tokenizer_path_de: str,
         batch_size: int = 8,
@@ -131,6 +132,8 @@ class DataloaderHelper:
         into dataloader format.
 
         Args:
+            dataset_type (str): Type of dataset to be used. Available options
+                are "iwslt2017" and "wmt14"
             tokenizer_path_en (str): Path for english tokenizer.
             tokenizer_path_de (str): Path for German tokenizer.
             batch_size (int, optional): Batch size to be used. Defaults to 8.
@@ -143,9 +146,7 @@ class DataloaderHelper:
         """
         self.batch_size = batch_size
         self.seq_len = seq_len
-        self.dataset_iterator = load_dataset(
-            "iwslt2017", "iwslt2017-de-en", split=split
-        )
+        self.dataset_iterator = get_dataset_iterators(dataset_type, split)
         self.tokenizer_en = load_tokenizer(tokenizer_path_en)
         self.tokenizer_de = load_tokenizer(tokenizer_path_de)
 
@@ -201,12 +202,12 @@ class DataloaderHelper:
 
 
 if __name__ == "__main__":
-    tokenizer_path_en = "./tokenizer_data/bpe_iwslt2016_tokenizer_en.json"
-    tokenizer_path_de = "./tokenizer_data/bpe_iwslt2016_tokenizer_de.json"
+    tokenizer_path_en = "./tokenizer_data/bpe_tokenizer_en.json"
+    tokenizer_path_de = "./tokenizer_data/bpe_tokenizer_de.json"
     bs = 8
     max_len = 128
     train_dataloader = DataloaderHelper(
-        tokenizer_path_en, tokenizer_path_de, bs, max_len, "validation"
+        "iwslt2017", tokenizer_path_en, tokenizer_path_de, bs, max_len, "validation"
     )
     train_iter = train_dataloader.get_iterator()
     print("Dataloaded")

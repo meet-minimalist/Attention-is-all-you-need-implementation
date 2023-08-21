@@ -39,6 +39,7 @@ class Trainer:
         self.cfg = cfg
 
         self.train_dataloader = DataloaderHelper(
+            cfg.train_cfg.dataset,
             cfg.tokenizer_path_en,
             cfg.tokenizer_path_de,
             cfg.train_cfg.batch_size,
@@ -46,6 +47,7 @@ class Trainer:
             "train",
         )
         self.valid_dataloader = DataloaderHelper(
+            cfg.train_cfg.dataset,
             cfg.tokenizer_path_en,
             cfg.tokenizer_path_de,
             cfg.train_cfg.batch_size,
@@ -53,6 +55,7 @@ class Trainer:
             "validation",
         )
         self.test_dataloader = DataloaderHelper(
+            cfg.train_cfg.dataset,
             cfg.tokenizer_path_en,
             cfg.tokenizer_path_de,
             cfg.train_cfg.batch_size,

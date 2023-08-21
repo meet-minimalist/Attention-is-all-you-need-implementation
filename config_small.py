@@ -45,6 +45,7 @@ class TrainingConfig:
     label_smoothing = 0.1
     init_lr = 1e-3
     burn_in_epochs = 2
+    dataset = "iwslt2017"
 
 
 enc = EncoderConfig()
