@@ -131,6 +131,10 @@ class TransformerEncoderDecoder(nn.Module):
             self.dec_vocab_size, self.d_model, apply_softmax=False
         )
 
+        # We will reuse the decoder embedding layer weight to project the prediction
+        # back to vocabulary space.
+        self.decoder_generator.linear.weight = self.dec_emb_layer.emb_layer.weight
+
     def encoder(self, enc_seq: torch.Tensor, enc_mask: torch.Tensor) -> torch.Tensor:
         # enc_seq   : [batch, seq_len]
         # enc_mask  : [batch, 1, 1, seq_len] for encoder

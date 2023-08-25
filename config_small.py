@@ -6,18 +6,18 @@
 #
 from dataclasses import dataclass
 
-d_model = 128
+d_model = 192
 pos_dropout = 0.1  # Positional Embedding Dropout
 max_len = 3000
-tokenizer_path_en = "./tokenizer_data/bpe_iwslt2016_tokenizer_en.json"
-tokenizer_path_de = "./tokenizer_data/bpe_iwslt2016_tokenizer_de.json"
+tokenizer_path_en = "./tokenizer_data/bpe_tokenizer_en.json"
+tokenizer_path_de = "./tokenizer_data/bpe_tokenizer_de.json"
 
 
 @dataclass
 class EncoderConfig:
     dropout = 0.1
-    num_heads = 4
-    num_block = 3
+    num_heads = 6
+    num_block = 2
     d_ff = 256
     use_bias = True
     vocab_size = 30000
@@ -26,8 +26,8 @@ class EncoderConfig:
 @dataclass
 class DecoderConfig:
     dropout = 0.1
-    num_heads = 4
-    num_block = 3
+    num_heads = 6
+    num_block = 2
     d_ff = 256
     use_bias = True
     vocab_size = 40000
@@ -35,7 +35,7 @@ class DecoderConfig:
 
 @dataclass
 class TrainingConfig:
-    batch_size = 2
+    batch_size = 4
     seq_len = 128
     use_amp = False
     epochs = 10

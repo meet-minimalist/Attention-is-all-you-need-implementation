@@ -16,7 +16,7 @@ from torch.nn import CrossEntropyLoss
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from torchinfo import summary
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from dataset_loader import DataloaderHelper
 from misc.checkpoint_handler import CheckpointHandler
@@ -139,12 +139,18 @@ class Trainer:
         """
         # logits: [B, seq, vocab]
         # labels: [B, seq]
+
+        # Skipping first token in the decoder sequence as the first token is for
+        # [SOS]. So we dont need to compute the loss for [SOS] input.
+        labels = labels[:, 1:]
+        logits = logits[:, 1:, :]
+
         batch_size = logits.shape[0]
         seq_len = logits.shape[1]
         vocab_size = logits.shape[-1]
 
-        logits = logits.view(-1, vocab_size)
-        labels = labels.view(-1)
+        logits = torch.reshape(logits, (-1, vocab_size))
+        labels = torch.reshape(labels, (-1,))
 
         # We would sum across each sequence length and average across all batches.
         loss = loss_fn(logits, labels) / batch_size

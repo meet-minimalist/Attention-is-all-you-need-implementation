@@ -12,6 +12,7 @@ import datasets
 import torch
 from tokenizers import Tokenizer
 from tokenizers.processors import TemplateProcessing
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Sampler
 
 from misc.utils import get_dataset_iterators
@@ -86,14 +87,13 @@ class BatchSamplerSimilarLength(Sampler):
         single_batch_idx = []
         cummulative_token_len = 0
 
-        for idx, _ in sorted_indices:
-            token_len = self.indices[idx][1]
+        for idx, token_len in sorted_indices:
             cummulative_token_len += token_len
 
             single_batch_idx.append(idx)
 
             if cummulative_token_len > self.total_tokens_in_batch:
-                self.all_batch_idx.append(single_batch_idx)
+                self.all_batch_idx.append(single_batch_idx.copy())
                 single_batch_idx.clear()
                 cummulative_token_len = 0
 
@@ -107,6 +107,7 @@ class BatchSamplerSimilarLength(Sampler):
             List[int]: Yields list of indices for batch generation.
         """
         for batch_idx in self.all_batch_idx:
+            random.shuffle(batch_idx)
             yield batch_idx
 
     def __len__(self) -> int:
@@ -174,28 +175,27 @@ class DataloaderHelper:
             Tuple[torch.Tensor]: Tuple of source token, target token, source
                 mask, target mask and target labels.
         """
-        src_tokens, tar_tokens = [], []
         # src is german and tar is english.
+        src_tokens, tar_tokens, tar_labels = [], [], []
+
         for data in batch_data:
             src_text = data["translation"]["de"]
             tar_text = data["translation"]["en"]
-            src_tokens.append(src_text)
-            tar_tokens.append(tar_text)
+            src_tokenized_text = torch.tensor(self.tokenizer_de.encode(src_text).ids)
+            tar_tokenized_text = torch.tensor(self.tokenizer_en.encode(tar_text).ids)
 
-        src_tokens = torch.stack(
-            [
-                torch.tensor(tokenized_seq.ids)
-                for tokenized_seq in self.tokenizer_de.encode_batch(src_tokens)
-            ]
-        )
-        tar_tokens = torch.stack(
-            [
-                torch.tensor(tokenized_seq.ids)
-                for tokenized_seq in self.tokenizer_en.encode_batch(tar_tokens)
-            ]
-        )
-        tar_labels = tar_tokens[:, 1:]
-        tar_tokens = tar_tokens[:, :-1]
+            src_tokens.append(src_tokenized_text)
+
+            tar_tokenized_label = tar_tokenized_text[1:]
+            tar_tokenized_text = tar_tokenized_text[:-1]
+
+            tar_tokens.append(tar_tokenized_text)
+            tar_labels.append(tar_tokenized_label)
+
+        src_tokens = pad_sequence(src_tokens, batch_first=True)
+        tar_tokens = pad_sequence(tar_tokens, batch_first=True)
+        tar_labels = pad_sequence(tar_labels, batch_first=True)
+
         src_mask = get_src_pad_mask(src_tokens, self.tokenizer_de.token_to_id("[PAD]"))
         tar_mask = get_trg_pad_mask(tar_tokens, self.tokenizer_en.token_to_id("[PAD]"))
         return src_tokens, tar_tokens, src_mask, tar_mask, tar_labels
