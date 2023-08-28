@@ -133,3 +133,4 @@ datasets/
 extras/
 training_data/
 tokenizer_data/
+wandb/

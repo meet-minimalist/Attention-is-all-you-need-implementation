@@ -15,37 +15,43 @@ tokenizer_path_de = "./tokenizer_data/bpe_tokenizer_de.json"
 
 @dataclass
 class EncoderConfig:
-    dropout = 0.1
-    num_heads = 6
-    num_block = 2
-    d_ff = 256
-    use_bias = True
-    vocab_size = 30000
+    dropout: float = 0.1
+    num_heads: int = 6
+    num_block: int = 2
+    d_ff: int = 256
+    use_bias: bool = True
+    vocab_size: int = 30000
 
 
 @dataclass
 class DecoderConfig:
-    dropout = 0.1
-    num_heads = 6
-    num_block = 2
-    d_ff = 256
-    use_bias = True
-    vocab_size = 40000
+    dropout: float = 0.1
+    num_heads: int = 6
+    num_block: int = 2
+    d_ff: int = 256
+    use_bias: bool = True
+    vocab_size: int = 40000
 
 
 @dataclass
 class TrainingConfig:
-    batch_size = 4
-    seq_len = 128
-    use_amp = False
-    epochs = 10
-    train_data_path = "./training_data/"
-    loss_logging_frequency = 10
-    lr_scheduler = "cosine"
-    label_smoothing = 0.1
-    init_lr = 1e-3
-    burn_in_epochs = 2
-    dataset = "iwslt2017"
+    batch_size: int = 4
+    seq_len: int = 128
+    use_amp: bool = False
+    epochs: int = 50
+    train_data_path: str = "./training_data/"
+    loss_logging_frequency: int = 100
+    lr_scheduler: str = "cosine"
+    label_smoothing: float = 0.1
+    init_lr: float = 1e-3
+    burn_in_epochs: int = 2
+    dataset: str = "iwslt2017"
+    num_workers: int = 2
+    pin_memory: bool = True
+    persistent_workers: bool = True
+    apply_grad_clipping: bool = False
+    grad_clipping_max_norm: float = 0.0001
+    track_gradients: bool = True
 
 
 enc = EncoderConfig()

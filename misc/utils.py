@@ -9,12 +9,14 @@ import datetime
 import importlib
 import logging
 import os
-from typing import List, Union
+from dataclasses import asdict
+from typing import Dict, List, Union
 
 import datasets
 import torch
 from datasets import load_dataset
 
+import wandb
 from misc.logger import Logger
 from misc.lr_utils.cosine_annealing_lr import CosineAnnealing
 from misc.lr_utils.exp_decay_lr import ExpDecay
@@ -171,6 +173,41 @@ def get_dataset_iterators(
     else:
         raise NotImplementedError(f"Provided dataset {dataset_type} not supported.")
     return dataset_iterator
+
+
+def get_config_as_dict(config) -> Dict:
+    """Convert the given config module into a Dict.
+
+    Args:
+        config (Module): Imported config module.
+
+    Returns:
+        Dict: Dict representation of config.
+    """
+    attribute_list = [
+        attr
+        for attr in dir(config)
+        if not callable(getattr(config, attr)) and not attr.startswith("__")
+    ]
+
+    config_as_dict = {}
+    for attribute in attribute_list:
+        attribute_value = getattr(config, attribute)
+        config_as_dict[attribute] = attribute_value
+        if hasattr(attribute_value, "__dataclass_fields__"):
+            config_as_dict[attribute] = asdict(attribute_value)
+
+    return config_as_dict
+
+
+def init_wandb(config) -> None:
+    """Initiate the weights and bias tracking. To be called at the start of experiment.
+
+    Args:
+        config (Module): Imported config module.
+    """
+    config_dict = get_config_as_dict(config)
+    wandb.init(project="Attention is all you need implementation.", config=config_dict)
 
 
 class LossAverager:

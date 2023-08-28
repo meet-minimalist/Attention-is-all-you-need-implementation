@@ -6,7 +6,6 @@
 #
 
 import argparse
-import sys
 from typing import Tuple
 
 import torch
@@ -18,6 +17,7 @@ from torch.utils.data import DataLoader
 from torchinfo import summary
 from tqdm.auto import tqdm
 
+import wandb
 from dataset_loader import DataloaderHelper
 from misc.checkpoint_handler import CheckpointHandler
 from misc.summary_writer import SummaryHelper
@@ -28,6 +28,7 @@ from misc.utils import (
     get_logger,
     get_lr_scheduler,
     get_summary_path,
+    init_wandb,
     load_module,
     to_device,
 )
@@ -37,6 +38,8 @@ from model.enc_dec_transformer import TransformerEncoderDecoder
 class Trainer:
     def __init__(self, cfg):
         self.cfg = cfg
+        self.cpu = torch.device("cpu:0")
+        self.cuda = torch.device("cuda:0")
 
         self.train_dataloader = DataloaderHelper(
             cfg.train_cfg.dataset,
@@ -45,6 +48,10 @@ class Trainer:
             cfg.train_cfg.batch_size,
             cfg.train_cfg.seq_len,
             "train",
+            cfg.train_cfg.num_workers,
+            cfg.train_cfg.pin_memory,
+            cfg.train_cfg.persistent_workers,
+            str(self.cuda),
         )
         self.valid_dataloader = DataloaderHelper(
             cfg.train_cfg.dataset,
@@ -53,6 +60,10 @@ class Trainer:
             cfg.train_cfg.batch_size,
             cfg.train_cfg.seq_len,
             "validation",
+            cfg.train_cfg.num_workers,
+            cfg.train_cfg.pin_memory,
+            cfg.train_cfg.persistent_workers,
+            str(self.cuda),
         )
         self.test_dataloader = DataloaderHelper(
             cfg.train_cfg.dataset,
@@ -61,6 +72,10 @@ class Trainer:
             cfg.train_cfg.batch_size,
             cfg.train_cfg.seq_len,
             "test",
+            cfg.train_cfg.num_workers,
+            cfg.train_cfg.pin_memory,
+            cfg.train_cfg.persistent_workers,
+            str(self.cuda),
         )
         self.enc_pad_token = self.train_dataloader.tokenizer_de.token_to_id("[PAD]")
         self.dec_pad_token = self.train_dataloader.tokenizer_en.token_to_id("[PAD]")
@@ -87,9 +102,6 @@ class Trainer:
 
         self.epochs = self.cfg.train_cfg.epochs
 
-        self.cpu = torch.device("cpu:0")
-        self.cuda = torch.device("cuda:0")
-
         self.lr_scheduler = get_lr_scheduler(
             self.cfg.train_cfg.lr_scheduler,
             init_lr=self.cfg.train_cfg.init_lr,
@@ -101,6 +113,7 @@ class Trainer:
         self.logger = get_logger(self.exp_path)
         self.ckpt_dir = get_ckpt_dir(self.exp_path)
         self.ckpt_handler = CheckpointHandler(self.ckpt_dir, "model", max_to_keep=3)
+        init_wandb(self.cfg)
 
     def __print_model_summary(self) -> None:
         """Function to print the model's summary.
@@ -152,15 +165,15 @@ class Trainer:
         logits = torch.reshape(logits, (-1, vocab_size))
         labels = torch.reshape(labels, (-1,))
 
-        # We would sum across each sequence length and average across all batches.
-        loss = loss_fn(logits, labels) / batch_size
+        # We would take mean across all sequence length and all batches.
+        loss = loss_fn(logits, labels)
 
         probs = F.softmax(logits.detach(), dim=-1)
 
         # We need to ignore pad tokens.
         label_mask = labels != self.dec_pad_token
 
-        # We would mean across all sequence lengths and all batches.
+        # We would take mean across all sequence lengths and all batches.
         acc = (
             ((torch.argmax(probs, dim=-1) == labels) * label_mask).sum()
             * 100
@@ -207,6 +220,10 @@ class Trainer:
             # dst_labels: [batch, seq_len]
 
             opt.zero_grad()
+
+            # Uncomment below line to identify the issues related to nan when
+            # using AMP training.
+            # with torch.autograd.detect_anomaly(check_nan=True):
             with torch.cuda.amp.autocast(enabled=self.cfg.train_cfg.use_amp):
                 src_tokens, dst_tokens, src_mask, dst_mask, dst_labels = to_device(
                     [src_tokens, dst_tokens, src_mask, dst_mask, dst_labels], self.cuda
@@ -217,6 +234,14 @@ class Trainer:
                 )
 
             scaler.scale(loss).backward()
+
+            if self.cfg.train_cfg.apply_grad_clipping:
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(
+                    opt.param_groups[0]["params"],
+                    max_norm=self.cfg.train_cfg.grad_clipping_max_norm,
+                )
+
             scaler.step(opt)
             scaler.update()
 
@@ -234,6 +259,9 @@ class Trainer:
                     f"Accuracy: {acc:.2f}, "
                     f"LR: {lr:.5f}"
                 )
+
+                metrics = {"Epoch": (eps + 1), "Loss": loss, "Accuracy": acc, "LR": lr}
+                wandb.log(metrics, step=g_step)
 
                 summ_writer.add_summary(
                     {"loss": loss, "accuracy": acc, "lr": lr}, g_step
@@ -289,6 +317,11 @@ class Trainer:
                 f"Avg. Test Loss: {avg_test_loss:.4f}, "
                 + f"Avg. Test Accuracy: {avg_test_acc:.2f}"
             )
+            metrics = {
+                "Avg. Test Loss": avg_test_loss,
+                "Avg. Test Accuracy": avg_test_acc,
+            }
+            wandb.log(metrics, step=g_step)
 
             summ_writer.add_summary(
                 {"loss": avg_test_loss, "accuracy": avg_test_acc}, g_step
@@ -368,7 +401,7 @@ class Trainer:
             CrossEntropyLoss: Instance of cross entropy loss.
         """
         return CrossEntropyLoss(
-            reduction="sum",
+            reduction="mean",
             label_smoothing=self.cfg.train_cfg.label_smoothing,
             ignore_index=self.dec_pad_token,
         )
@@ -394,25 +427,31 @@ class Trainer:
         train_writer = self.__get_summary_writer("train")
         test_writer = self.__get_summary_writer("test")
 
+        train_iter = self.train_dataloader.get_iterator()
+        valid_iter = self.valid_dataloader.get_iterator()
+        test_iter = self.test_dataloader.get_iterator()
+
         self.transformer.to(self.cuda)
+
+        if self.cfg.train_cfg.track_gradients:
+            wandb.watch(self.transformer)
+
         for eps in range(resume_eps, self.epochs):
-            train_iter = self.train_dataloader.get_iterator()
-            # valid_iter = self.valid_dataloader.get_iterator()
             self.logger.info(f"Epoch: {eps + 1}/{self.epochs} Started")
             self.__train_batch_loop(train_iter, loss_fn, opt, scaler, train_writer, eps)
 
             g_step = eps * len(train_iter)
-            test_iter = self.test_dataloader.get_iterator()
             avg_test_loss, avg_test_acc = self.__test_batch_loop(
                 test_iter, loss_fn, test_writer, g_step
             )
 
-            self.__save_checkpoint(eps, g_step, avg_test_loss, opt, scaler)
+            self.__save_checkpoint(eps + 1, g_step, avg_test_loss, opt, scaler)
             self.logger.info(f"Epoch: {eps + 1}/{self.epochs} completed")
 
         print("Training Completed.")
         train_writer.close()
         test_writer.close()
+        wandb.finish()
 
 
 if __name__ == "__main__":
