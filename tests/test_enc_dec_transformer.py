@@ -7,7 +7,7 @@
 
 import torch
 
-import config as c
+import config_wmt as c
 from model.enc_dec_transformer import TransformerEncoderDecoder
 
 

@@ -35,9 +35,9 @@ class DecoderConfig:
 
 @dataclass
 class TrainingConfig:
-    batch_size: int = 4
+    batch_size: int = 6
     seq_len: int = 128
-    use_amp: bool = False
+    use_amp: bool = True
     epochs: int = 50
     train_data_path: str = "./training_data/"
     loss_logging_frequency: int = 100
@@ -47,11 +47,12 @@ class TrainingConfig:
     burn_in_epochs: int = 2
     dataset: str = "iwslt2017"
     num_workers: int = 2
-    pin_memory: bool = True
     persistent_workers: bool = True
-    apply_grad_clipping: bool = False
-    grad_clipping_max_norm: float = 0.0001
+    apply_grad_clipping: bool = True
+    grad_clipping_max_norm: float = 2
     track_gradients: bool = True
+    use_grad_accumulation: bool = True
+    grad_accumulation_steps: int = 8  # This will make the effective batch size = batch_size * grad_accumulation_steps
 
 
 enc = EncoderConfig()

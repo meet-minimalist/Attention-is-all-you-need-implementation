@@ -129,9 +129,7 @@ class DataloaderHelper:
         seq_len: int = 128,
         split: str = "train",
         num_workers: int = 2,
-        pin_memory: bool = True,
         persistent_workers: bool = True,
-        pin_memory_device: str = "cuda:0",
     ):
         """Initializer to load the dataset, prepare for training and convert it
         into dataloader format.
@@ -150,12 +148,8 @@ class DataloaderHelper:
             split (str, optional): Type of dataset split. Defaults to "train".
             num_workers (int, optional): Number of parallel workers to be used
                 for data loader. It should be twice of num GPUS. Defaults to 2.
-            pin_memory (bool, optional): Use CUDA Pin memory to dump the
-                prepared batch data. Defaults to True.
             persistent_workers (bool, optional): Whether to reuse the same
                 workers for all the iterations of the dataloader. Defaults to True.
-            pin_memory_device (str, optional): Name of pin memory device.
-                Defaults to "cuda:0".
         """
         self.batch_size = batch_size
         self.seq_len = seq_len
@@ -164,9 +158,7 @@ class DataloaderHelper:
         self.tokenizer_de = load_tokenizer(tokenizer_path_de)
 
         self.num_workers = num_workers
-        self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
-        self.pin_memory_device = pin_memory_device
 
     def get_iterator(self) -> DataLoader:
         dataloader = DataLoader(
@@ -180,9 +172,7 @@ class DataloaderHelper:
             ),
             collate_fn=self.collate_batch,
             num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
             persistent_workers=self.persistent_workers,
-            pin_memory_device=self.pin_memory_device,
         )
         return dataloader
 

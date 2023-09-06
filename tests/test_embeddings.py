@@ -7,7 +7,7 @@
 
 import torch
 
-import config as c
+import config_wmt as c
 from model.embeddings import Embeddings
 
 
