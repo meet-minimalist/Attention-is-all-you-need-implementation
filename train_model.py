@@ -18,7 +18,7 @@ from torchinfo import summary
 from tqdm.auto import tqdm
 
 import wandb
-from dataset_loader import DataloaderHelper
+from dataset_loader import DataloaderHelper, load_tokenizer
 from misc.checkpoint_handler import CheckpointHandler
 from misc.summary_writer import SummaryHelper
 from misc.utils import (
@@ -31,15 +31,33 @@ from misc.utils import (
     init_wandb,
     load_module,
     to_device,
+    compute_bleu,
+    decode_tokens,
 )
 from model.enc_dec_transformer import TransformerEncoderDecoder
 
 
 class Trainer:
-    def __init__(self, cfg):
+    def __init__(self, cfg, resume: bool = False, resume_ckpt: str = None, resume_wandb_id: int = None):
+        """Initializer for trainer class.
+
+        Args:
+            cfg (Module): Config Module.
+            resume (bool, optional): Whether to resume the training. Defaults
+                to False.
+            resume_ckpt (str, optional): Checkpoint path to be used to resume
+                training with. Defaults to None.
+            resume_wandb_id (str, optinal): Weights and Bias tracking id to be 
+                reused in case of resuming training. Defaults to None.
+        """
         self.cfg = cfg
+        self.resume = resume
+        self.resume_ckpt = resume_ckpt
         self.cpu = torch.device("cpu:0")
         self.cuda = torch.device("cuda:0")
+
+        self.tokenizer_en = load_tokenizer(cfg.tokenizer_path_en)
+        self.tokenizer_de = load_tokenizer(cfg.tokenizer_path_de)
 
         self.train_dataloader = DataloaderHelper(
             cfg.train_cfg.dataset,
@@ -49,9 +67,7 @@ class Trainer:
             cfg.train_cfg.seq_len,
             "train",
             cfg.train_cfg.num_workers,
-            cfg.train_cfg.pin_memory,
             cfg.train_cfg.persistent_workers,
-            str(self.cuda),
         )
         self.valid_dataloader = DataloaderHelper(
             cfg.train_cfg.dataset,
@@ -61,9 +77,7 @@ class Trainer:
             cfg.train_cfg.seq_len,
             "validation",
             cfg.train_cfg.num_workers,
-            cfg.train_cfg.pin_memory,
             cfg.train_cfg.persistent_workers,
-            str(self.cuda),
         )
         self.test_dataloader = DataloaderHelper(
             cfg.train_cfg.dataset,
@@ -73,12 +87,10 @@ class Trainer:
             cfg.train_cfg.seq_len,
             "test",
             cfg.train_cfg.num_workers,
-            cfg.train_cfg.pin_memory,
             cfg.train_cfg.persistent_workers,
-            str(self.cuda),
         )
-        self.enc_pad_token = self.train_dataloader.tokenizer_de.token_to_id("[PAD]")
-        self.dec_pad_token = self.train_dataloader.tokenizer_en.token_to_id("[PAD]")
+        self.enc_pad_token = self.tokenizer_de.token_to_id("[PAD]")
+        self.dec_pad_token = self.tokenizer_en.token_to_id("[PAD]")
 
         self.transformer = TransformerEncoderDecoder(
             cfg.enc.vocab_size,
@@ -113,7 +125,8 @@ class Trainer:
         self.logger = get_logger(self.exp_path)
         self.ckpt_dir = get_ckpt_dir(self.exp_path)
         self.ckpt_handler = CheckpointHandler(self.ckpt_dir, "model", max_to_keep=3)
-        init_wandb(self.cfg)
+        self.accumulation_steps = self.cfg.train_cfg.grad_accumulation_steps if self.cfg.train_cfg.use_grad_accumulation else 1
+        init_wandb(self.cfg, resume_wandb_id)
 
     def __print_model_summary(self) -> None:
         """Function to print the model's summary.
@@ -133,14 +146,13 @@ class Trainer:
         for line in str(model_stats).split("\n"):
             self.logger.debug(line)
 
-    def __compute_loss_and_accuracy(
+    def __compute_loss(
         self,
         logits: torch.Tensor,
         labels: torch.Tensor,
         loss_fn: CrossEntropyLoss,
-    ) -> Tuple[torch.Tensor]:
-        """Function to compute loss value and accuracy value based on the logits
-        and labels.
+    ) -> torch.Tensor:
+        """Function to compute loss value based on the logits and labels.
 
         Args:
             logits (torch.Tensor): Logits from model in shape [b x seq x vocab].
@@ -148,7 +160,7 @@ class Trainer:
             loss_fn (CrossEntropyLoss): Cross entropy loss function instance.
 
         Returns:
-            Tuple[torch.Tensor]: Tuple of calculated loss and accuracy value.
+            torch.Tensor: Calculated loss value.
         """
         # logits: [B, seq, vocab]
         # labels: [B, seq]
@@ -159,14 +171,53 @@ class Trainer:
         logits = logits[:, 1:, :]
 
         batch_size = logits.shape[0]
-        seq_len = logits.shape[1]
         vocab_size = logits.shape[-1]
 
         logits = torch.reshape(logits, (-1, vocab_size))
         labels = torch.reshape(labels, (-1,))
 
         # We would take mean across all sequence length and all batches.
-        loss = loss_fn(logits, labels)
+        loss = loss_fn(logits, labels) * batch_size / self.accumulation_steps
+
+        return loss
+
+    def __compute_accuracy_and_bleu(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> Tuple[torch.Tensor]:
+        """Function to compute accuracy value and bleu value based on the 
+        logits and labels.
+
+        Args:
+            logits (torch.Tensor): Logits from model in shape [b x seq x vocab].
+            labels (torch.Tensor): Labels from dataloader in shape [b x seq].
+
+        Returns:
+            Tuple[torch.Tensor]: Tuple of calculated accuracy and bleu value.
+        """
+        # logits: [B, seq, vocab]
+        # labels: [B, seq]
+
+        # Skipping first token in the decoder sequence as the first token is for
+        # [SOS]. So we dont need to compute the loss for [SOS] input.
+        
+        decoded_labels = decode_tokens(self.tokenizer_en, to_device(labels, self.cpu).numpy())
+        # [N]
+        decoded_logits = decode_tokens(self.tokenizer_en, to_device(torch.argmax(logits, dim=-1), self.cpu).numpy())
+        # [N]
+        
+        bleu = compute_bleu(decoded_logits, decoded_labels)
+
+        labels = labels[:, 1:]
+        logits = logits[:, 1:, :]
+
+        batch_size = logits.shape[0]
+        seq_len = logits.shape[1]
+        vocab_size = logits.shape[-1]
+
+        logits = torch.reshape(logits, (-1, vocab_size))
+        labels = torch.reshape(labels, (-1,))
 
         probs = F.softmax(logits.detach(), dim=-1)
 
@@ -180,7 +231,7 @@ class Trainer:
             / (batch_size * seq_len)
         )
 
-        return loss, acc
+        return acc, bleu
 
     def __train_batch_loop(
         self,
@@ -219,7 +270,6 @@ class Trainer:
             # dst_mask  : [batch, 1, seq_len, seq_len]
             # dst_labels: [batch, seq_len]
 
-            opt.zero_grad()
 
             # Uncomment below line to identify the issues related to nan when
             # using AMP training.
@@ -229,27 +279,36 @@ class Trainer:
                     [src_tokens, dst_tokens, src_mask, dst_mask, dst_labels], self.cuda
                 )
                 logits = self.transformer(src_tokens, dst_tokens, src_mask, dst_mask)
-                loss, acc = self.__compute_loss_and_accuracy(
-                    logits, dst_labels, loss_fn
-                )
+                loss = self.__compute_loss(logits, dst_labels, loss_fn)
+                loss = loss / self.accumulation_steps
 
             scaler.scale(loss).backward()
 
-            if self.cfg.train_cfg.apply_grad_clipping:
-                scaler.unscale_(opt)
-                torch.nn.utils.clip_grad_norm_(
-                    opt.param_groups[0]["params"],
-                    max_norm=self.cfg.train_cfg.grad_clipping_max_norm,
-                )
 
-            scaler.step(opt)
-            scaler.update()
+            if ((g_step + 1) % self.accumulation_steps == 0) or (g_step + 1 == len(iterator)):
+                
+                # As per doc, `unscale_` should only be called once per optimizer 
+                # per `step` call and only after all gradients for that optimizer's 
+                # assigned parameters have been accumulated.
+                # Calling `unscale_` twice for a given optimizer between each `step` 
+                # triggers a RuntimeError.
 
-            lr = self.lr_scheduler.step(g_step, opt)
-            opt.step()
+                if self.cfg.train_cfg.apply_grad_clipping:
+                    scaler.unscale_(opt)
+                    torch.nn.utils.clip_grad_norm_(
+                        opt.param_groups[0]["params"],
+                        max_norm=self.cfg.train_cfg.grad_clipping_max_norm,
+                    )
+                
+                lr = self.lr_scheduler.step(g_step, opt)
+                scaler.step(opt)
+                scaler.update()
+                opt.zero_grad()
 
             if (batch_num + 1) % self.cfg.train_cfg.loss_logging_frequency == 0:
                 loss = to_device(loss, self.cpu)
+
+                acc, bleu = self.__compute_accuracy_and_bleu(logits, dst_labels)
                 acc = to_device(acc, self.cpu)
 
                 self.logger.info(
@@ -257,14 +316,15 @@ class Trainer:
                     f"Batch No.: {batch_num + 1}/{len(iterator)}, "
                     f"Loss: {loss:.4f}, "
                     f"Accuracy: {acc:.2f}, "
+                    f"BLEU: {bleu:.4f}, "
                     f"LR: {lr:.5f}"
                 )
 
-                metrics = {"Epoch": (eps + 1), "Loss": loss, "Accuracy": acc, "LR": lr}
+                metrics = {"Epoch": (eps + 1), "Loss": loss, "Accuracy": acc, "BLEU": bleu, "LR": lr}
                 wandb.log(metrics, step=g_step)
 
                 summ_writer.add_summary(
-                    {"loss": loss, "accuracy": acc, "lr": lr}, g_step
+                    {"loss": loss, "accuracy": acc, "lr": lr, "bleu" : bleu}, g_step
                 )
             g_step += 1
 
@@ -289,8 +349,8 @@ class Trainer:
         """
         self.transformer.eval()
 
-        # Only test_loss and accuracy to be tracked.
-        test_tracker = LossAverager(num_elements=2)
+        # Only test_loss, accuracy and bleu to be tracked.
+        test_tracker = LossAverager(num_elements=3)
 
         with torch.no_grad():
             for src_tokens, dst_tokens, src_mask, dst_mask, dst_labels in tqdm(
@@ -306,27 +366,28 @@ class Trainer:
                     [src_tokens, dst_tokens, src_mask, dst_mask, dst_labels], self.cuda
                 )
                 logits = self.transformer(src_tokens, dst_tokens, src_mask, dst_mask)
-                loss, acc = self.__compute_loss_and_accuracy(
-                    logits, dst_labels, loss_fn
-                )
-                test_tracker([loss, acc])
+                loss = self.__compute_loss(logits, dst_labels, loss_fn)
+                acc, bleu = self.__compute_accuracy_and_bleu(logits, dst_labels)
+                test_tracker([loss, acc, bleu])
 
-            avg_test_loss, avg_test_acc = test_tracker.get_averages()
+            avg_test_loss, avg_test_acc, avg_test_bleu = test_tracker.get_averages()
 
             self.logger.info(
                 f"Avg. Test Loss: {avg_test_loss:.4f}, "
-                + f"Avg. Test Accuracy: {avg_test_acc:.2f}"
+                + f"Avg. Test Accuracy: {avg_test_acc:.2f}, "
+                + f"Avg. Test BLEU: {avg_test_bleu:.4f}"
             )
             metrics = {
                 "Avg. Test Loss": avg_test_loss,
                 "Avg. Test Accuracy": avg_test_acc,
+                "Avg. Test BLEU": avg_test_bleu,
             }
             wandb.log(metrics, step=g_step)
 
             summ_writer.add_summary(
-                {"loss": avg_test_loss, "accuracy": avg_test_acc}, g_step
+                {"loss": avg_test_loss, "accuracy": avg_test_acc, "bleu": avg_test_bleu}, g_step
             )
-        return avg_test_loss, avg_test_acc
+        return avg_test_loss, avg_test_acc, avg_test_bleu
 
     def __get_summary_writer(self, type: str) -> SummaryHelper:
         """Function to get the SummaryHelper object which will create and upated
@@ -406,14 +467,8 @@ class Trainer:
             ignore_index=self.dec_pad_token,
         )
 
-    def train(self, resume: bool = False, resume_ckpt: str = None) -> None:
+    def train(self) -> None:
         """Function to be used to train the model based on provided config.
-
-        Args:
-            resume (bool, optional): Whether to resume the training. Defaults
-                to False.
-            resume_ckpt (str, optional): Checkpoint path to be used to resume
-                training with. Defaults to None.
         """
         self.__print_model_summary()
 
@@ -422,7 +477,7 @@ class Trainer:
         opt = torch.optim.Adam(self.transformer.parameters(), lr=0.0, weight_decay=0.0)
         scaler = torch.cuda.amp.GradScaler(enabled=self.cfg.train_cfg.use_amp)
 
-        resume_eps, g_step = self.__resume_training(resume, resume_ckpt, opt, scaler)
+        resume_eps, g_step = self.__resume_training(self.resume, self.resume_ckpt, opt, scaler)
 
         train_writer = self.__get_summary_writer("train")
         test_writer = self.__get_summary_writer("test")
@@ -441,7 +496,7 @@ class Trainer:
             self.__train_batch_loop(train_iter, loss_fn, opt, scaler, train_writer, eps)
 
             g_step = eps * len(train_iter)
-            avg_test_loss, avg_test_acc = self.__test_batch_loop(
+            avg_test_loss, avg_test_acc, avg_test_bleu = self.__test_batch_loop(
                 test_iter, loss_fn, test_writer, g_step
             )
 
@@ -465,8 +520,26 @@ if __name__ == "__main__":
         required=True,
         help="Path of config file to be used for training.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store",
+        type=bool,
+        help="Use it to resume the training.",
+    )
+    parser.add_argument(
+        "--resume_ckpt",
+        type=str,
+        default=None,
+        help="Checkpoint path to be used for resuming the training.",
+    )
+    parser.add_argument(
+        "--resume_wandb_id",
+        type=str,
+        default=None,
+        help="Weights and biases experiment id to be used for resuming.",
+    )
     args = parser.parse_args()
 
     config = load_module(args.config_path)
-    trainer = Trainer(config)
+    trainer = Trainer(config, args.resume, args.resume_ckpt, args.resume_wandb_id)
     trainer.train()

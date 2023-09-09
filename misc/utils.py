@@ -12,11 +12,13 @@ import os
 from dataclasses import asdict
 from typing import Dict, List, Union
 
+import wandb
 import datasets
 import torch
+import numpy as np
 from datasets import load_dataset
+from torchmetrics.text import BLEUScore
 
-import wandb
 from misc.logger import Logger
 from misc.lr_utils.cosine_annealing_lr import CosineAnnealing
 from misc.lr_utils.exp_decay_lr import ExpDecay
@@ -48,7 +50,7 @@ def get_logger(cur_exp_path: str) -> logging.Logger:
     Returns:
         logging.Logger: Logger instance.
     """
-    logger_path = os.path.join(cur_exp_path, "log.txt")
+    logger_path = os.path.join(cur_exp_path)
     logger = Logger(logger_path)
 
     start_time = datetime.datetime.now()
@@ -200,14 +202,52 @@ def get_config_as_dict(config) -> Dict:
     return config_as_dict
 
 
-def init_wandb(config) -> None:
+def init_wandb(config, resume_wandb_id: int) -> None:
     """Initiate the weights and bias tracking. To be called at the start of experiment.
 
     Args:
         config (Module): Imported config module.
+        resume_wandb_id (int): Weights and Bias tracking id to be reused in 
+            case of resuming training. Defaults to None.
     """
     config_dict = get_config_as_dict(config)
-    wandb.init(project="Attention is all you need implementation.", config=config_dict)
+    wandb.init(project="Attention is all you need implementation.", config=config_dict, resume="allow", id=resume_wandb_id)
+
+
+def compute_bleu(prediction: Union[List[str], str], label: Union[List[str], str]) -> float:
+    """Compute bleu score between prediction and label pair. Make sure that the 
+    prediction and label are free from special tokens such as [SOS], [EOS], [PAD].
+
+    Args:
+        prediction (Union[List[str], str]): Prediction string. 
+        label (Union[List[str], str]): Label string.
+
+    Returns:
+        float: BLEU score w.r.t. given prediction and label pair.
+    """
+    # We would compute BLEU for unigram, bigram, 3-gram and 4-gram.
+    bleu = BLEUScore(n_gram=4)
+    if isinstance(prediction, List) and isinstance(label, List):
+        total_score = []
+        for _pred, _label in zip(prediction, label):
+            score = bleu([_pred], [[_label]])
+            total_score.append(score)
+        return sum(total_score) / len(total_score)
+    else:
+        score = bleu([prediction], [[label]])
+        return score
+
+def decode_tokens(tokenizer, batch_tokens):
+    if len(batch_tokens.shape) == 2:
+        # tokens : [batch, seq_len]        
+        decoded_sentences = []
+        for single_sentence_tokens in batch_tokens:
+            single_sentence = tokenizer.decode(single_sentence_tokens)
+            decoded_sentences.append(single_sentence)
+        return decoded_sentences
+    
+    single_sentence = tokenizer.decode(batch_tokens)
+    return single_sentence
 
 
 class LossAverager:
