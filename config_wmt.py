@@ -15,37 +15,44 @@ tokenizer_path_de = "./tokenizer_data/bpe_tokenizer_de.json"
 
 @dataclass
 class EncoderConfig:
-    dropout = 0.1
-    num_heads = 8
-    num_block = 6
-    d_ff = 2048
-    use_bias = True
-    vocab_size = 30000
+    dropout: float = 0.1
+    num_heads: int = 8
+    num_block: int = 6
+    d_ff: int = 2048
+    use_bias: bool = True
+    vocab_size: int = 30000
 
 
 @dataclass
 class DecoderConfig:
-    dropout = 0.1
-    num_heads = 8
-    num_block = 6
-    d_ff = 2048
-    use_bias = True
-    vocab_size = 40000
+    dropout: float = 0.1
+    num_heads: int = 8
+    num_block: int = 6
+    d_ff: int = 2048
+    use_bias: bool = True
+    vocab_size: int = 40000
 
 
 @dataclass
 class TrainingConfig:
-    batch_size = 8
-    seq_len = 128
-    use_amp = False
-    epochs = 10
-    train_data_path = "./training_data/"
-    loss_logging_frequency = 10
-    lr_scheduler = "cosine"
-    label_smoothing = 0.1
-    init_lr = 1e-3
-    burn_in_epochs = 2
-    dataset = "wmt14"
+    batch_size: int = 8
+    seq_len: int = 128
+    use_amp: bool = False
+    epochs: int = 10
+    train_data_path: str = "./training_data/"
+    loss_logging_frequency: int = 10
+    lr_scheduler: str = "cosine"
+    label_smoothing: float = 0.1
+    init_lr: float = 5e-4
+    burn_in_epochs: int = 2
+    dataset: str = "wmt14"
+    num_workers: int = 4
+    persistent_workers: bool = True
+    apply_grad_clipping: bool = False
+    grad_clipping_max_norm: float = 2
+    track_gradients: bool = True
+    use_grad_accumulation: bool = True
+    grad_accumulation_steps: int = 32  # This will make the effective batch size = batch_size * grad_accumulation_steps
 
 
 enc = EncoderConfig()
