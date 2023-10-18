@@ -5,6 +5,7 @@
 # @copyright MIT License
 #
 
+import os
 import random
 from typing import List, Tuple
 
@@ -29,6 +30,9 @@ def load_tokenizer(tokenizer_path: str) -> Tokenizer:
     Returns:
         Tokenizer: Pretrained tokenizer object
     """
+    if not os.path.isfile(tokenizer_path):
+        print(f"No tokenizer found at location: {tokenizer_path}")
+        
     tokenizer = Tokenizer.from_file(tokenizer_path)
 
     tokenizer.post_processor = TemplateProcessing(

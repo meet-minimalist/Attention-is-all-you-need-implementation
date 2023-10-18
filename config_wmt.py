@@ -44,7 +44,7 @@ class TrainingConfig:
     lr_scheduler: str = "cosine"
     label_smoothing: float = 0.1
     init_lr: float = 5e-4
-    burn_in_epochs: int = 2
+    warmup_epochs: int = 2
     dataset: str = "wmt14"
     num_workers: int = 4
     persistent_workers: bool = True
@@ -53,7 +53,7 @@ class TrainingConfig:
     track_gradients: bool = True
     use_grad_accumulation: bool = True
     grad_accumulation_steps: int = 32  # This will make the effective batch size = batch_size * grad_accumulation_steps
-
+    use_tpu: bool = False
 
 enc = EncoderConfig()
 dec = DecoderConfig()
