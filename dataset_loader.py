@@ -32,7 +32,7 @@ def load_tokenizer(tokenizer_path: str) -> Tokenizer:
     """
     if not os.path.isfile(tokenizer_path):
         print(f"No tokenizer found at location: {tokenizer_path}")
-        
+
     tokenizer = Tokenizer.from_file(tokenizer_path)
 
     tokenizer.post_processor = TemplateProcessing(

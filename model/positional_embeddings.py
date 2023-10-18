@@ -31,11 +31,13 @@ class PositionalEmbeddings(nn.Module):
 
         pe = torch.zeros(size=[max_len, d_model])
 
-        positions = torch.arange(0, max_len).unsqueeze(1)   # [seq_len, 1]
-        denominator = torch.pow(10000, torch.arange(0, self.d_model, 2) / self.d_model)     # [emb_size // 2]
-        pe[:, 0::2] = torch.sin(positions / denominator)    # [seq_len, emb_size // 2]
-        pe[:, 1::2] = torch.cos(positions / denominator)    # [seq_len, emb_size // 2]
-        pe = pe.unsqueeze(0)                                # [batch, seq_len, emb_size]
+        positions = torch.arange(0, max_len).unsqueeze(1)  # [seq_len, 1]
+        denominator = torch.pow(
+            10000, torch.arange(0, self.d_model, 2) / self.d_model
+        )  # [emb_size // 2]
+        pe[:, 0::2] = torch.sin(positions / denominator)  # [seq_len, emb_size // 2]
+        pe[:, 1::2] = torch.cos(positions / denominator)  # [seq_len, emb_size // 2]
+        pe = pe.unsqueeze(0)  # [batch, seq_len, emb_size]
 
         # Registering so as to pass this tensor to GPU if req. we calling model.cuda()
         # But using persistent as False as this is a large tensor and we shall not transfer

@@ -6,14 +6,18 @@
 #
 
 # Call this file as : python -m misc.plot_lr --op_path "./plot_lr.jpg"
- 
+
 import argparse
+
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-from misc.utils import get_lr_scheduler
-import matplotlib.pyplot as plt
 
-parser = argparse.ArgumentParser(description="Argument parser for plotting learning rate.")
+from misc.utils import get_lr_scheduler
+
+parser = argparse.ArgumentParser(
+    description="Argument parser for plotting learning rate."
+)
 parser.add_argument(
     "--op_path",
     type=str,
@@ -41,7 +45,7 @@ parser.add_argument(
 parser.add_argument(
     "--steps_per_epoch",
     type=int,
-    default=17061,      # Based on WMT dataset
+    default=17061,  # Based on WMT dataset
     help="Steps per epoch in training model.",
 )
 parser.add_argument(
@@ -70,13 +74,13 @@ for e in tqdm(range(args.num_epochs)):
         if (g_step % 1000) == 0:
             lr_mapping.append([g_step, lr])
             print(f"Epoch {e}, Batch num: {b}, G_Step: {g_step}, LR: {lr:.6f}")
-            
-lr_mapping = np.array(lr_mapping)               # [N, 2]
-training_steps = np.int32(lr_mapping[:, 0])     # [N]
-learning_rates = lr_mapping[:, 1]               # [N]
 
-plt.plot(training_steps, learning_rates, linestyle='-')
-plt.xlabel('Training Steps')
-plt.ylabel('Learning Rate')
-plt.title('Learning Rate Schedule')
+lr_mapping = np.array(lr_mapping)  # [N, 2]
+training_steps = np.int32(lr_mapping[:, 0])  # [N]
+learning_rates = lr_mapping[:, 1]  # [N]
+
+plt.plot(training_steps, learning_rates, linestyle="-")
+plt.xlabel("Training Steps")
+plt.ylabel("Learning Rate")
+plt.title("Learning Rate Schedule")
 plt.savefig(args.op_path)

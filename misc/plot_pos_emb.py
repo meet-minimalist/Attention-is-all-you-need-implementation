@@ -5,13 +5,17 @@
 # @copyright MIT License
 #
 
-# Call this file as : python -m misc.plot_pos_emb --op_path "./plot_pos_emb.jpg" 
+# Call this file as : python -m misc.plot_pos_emb --op_path "./plot_pos_emb.jpg"
 
 import argparse
+
 import matplotlib.pyplot as plt
+
 from model.positional_embeddings import PositionalEmbeddings
 
-parser = argparse.ArgumentParser(description="Argument parser for plotting positional embeddings.")
+parser = argparse.ArgumentParser(
+    description="Argument parser for plotting positional embeddings."
+)
 parser.add_argument(
     "--op_path",
     type=str,

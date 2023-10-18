@@ -23,6 +23,8 @@ from misc.checkpoint_handler import CheckpointHandler
 from misc.summary_writer import SummaryHelper
 from misc.utils import (
     LossAverager,
+    compute_bleu,
+    decode_tokens,
     get_ckpt_dir,
     get_exp_path,
     get_logger,
@@ -31,14 +33,18 @@ from misc.utils import (
     init_wandb,
     load_module,
     to_device,
-    compute_bleu,
-    decode_tokens,
 )
 from model.enc_dec_transformer import TransformerEncoderDecoder
 
 
 class Trainer:
-    def __init__(self, cfg, resume: bool = False, resume_ckpt: str = None, resume_wandb_id: int = None):
+    def __init__(
+        self,
+        cfg,
+        resume: bool = False,
+        resume_ckpt: str = None,
+        resume_wandb_id: int = None,
+    ):
         """Initializer for trainer class.
 
         Args:
@@ -47,7 +53,7 @@ class Trainer:
                 to False.
             resume_ckpt (str, optional): Checkpoint path to be used to resume
                 training with. Defaults to None.
-            resume_wandb_id (str, optinal): Weights and Bias tracking id to be 
+            resume_wandb_id (str, optinal): Weights and Bias tracking id to be
                 reused in case of resuming training. Defaults to None.
         """
         self.cfg = cfg
@@ -118,14 +124,18 @@ class Trainer:
             self.cfg.train_cfg.lr_scheduler,
             init_lr=self.cfg.train_cfg.init_lr,
             epochs=self.epochs,
-            burn_in_epochs=self.cfg.train_cfg.burn_in_epochs,
+            warmup_epochs=self.cfg.train_cfg.warmup_epochs,
             steps_per_epoch=len(self.train_dataloader.get_iterator()),
         )
         self.exp_path = get_exp_path(cfg.train_cfg.train_data_path)
         self.logger = get_logger(self.exp_path)
         self.ckpt_dir = get_ckpt_dir(self.exp_path)
         self.ckpt_handler = CheckpointHandler(self.ckpt_dir, "model", max_to_keep=3)
-        self.accumulation_steps = self.cfg.train_cfg.grad_accumulation_steps if self.cfg.train_cfg.use_grad_accumulation else 1
+        self.accumulation_steps = (
+            self.cfg.train_cfg.grad_accumulation_steps
+            if self.cfg.train_cfg.use_grad_accumulation
+            else 1
+        )
         init_wandb(self.cfg, resume_wandb_id)
 
     def __print_model_summary(self) -> None:
@@ -186,7 +196,7 @@ class Trainer:
         logits: torch.Tensor,
         labels: torch.Tensor,
     ) -> Tuple[torch.Tensor]:
-        """Function to compute accuracy value and bleu value based on the 
+        """Function to compute accuracy value and bleu value based on the
         logits and labels.
 
         Args:
@@ -201,12 +211,25 @@ class Trainer:
 
         # Skipping first token in the decoder sequence as the first token is for
         # [SOS]. So we dont need to compute the loss for [SOS] input.
-        
-        decoded_labels = decode_tokens(self.tokenizer_en, to_device(labels, self.cpu).numpy())
+
+        decoded_labels = decode_tokens(
+            self.tokenizer_en, to_device(labels, self.cpu).numpy()
+        )
         # [N]
-        decoded_logits = decode_tokens(self.tokenizer_en, to_device(torch.argmax(logits, dim=-1), self.cpu).numpy())
+        decoded_logits = decode_tokens(
+            self.tokenizer_en, to_device(torch.argmax(logits, dim=-1), self.cpu).numpy()
+        )
         # [N]
-        
+
+        # all_tokens = torch.concat([labels, torch.argmax(logits, dim=-1)], dim=0)
+
+        # decoded_tokens = decode_tokens(self.tokenizer_en, to_device(all_tokens, self.cpu).numpy())
+
+        # decoded_labels = decoded_tokens[:len(decoded_tokens)//2]
+        # # [N]
+        # decoded_logits = decoded_tokens[len(decoded_tokens)//2:]
+        # # [N]
+
         bleu = compute_bleu(decoded_logits, decoded_labels)
 
         labels = labels[:, 1:]
@@ -256,7 +279,6 @@ class Trainer:
         """
         self.transformer.train()
 
-        g_step = eps * len(iterator)
         for batch_num, (
             src_tokens,
             dst_tokens,
@@ -269,7 +291,6 @@ class Trainer:
             # src_mask  : [batch, 1, 1, seq_len]
             # dst_mask  : [batch, 1, seq_len, seq_len]
             # dst_labels: [batch, seq_len]
-
 
             # Uncomment below line to identify the issues related to nan when
             # using AMP training.
@@ -284,13 +305,16 @@ class Trainer:
 
             scaler.scale(loss).backward()
 
+            # Keeping this outside since it is used in multiple if conditions.
+            lr = self.lr_scheduler.step(self.g_step, opt)
 
-            if ((g_step + 1) % self.accumulation_steps == 0) or (g_step + 1 == len(iterator)):
-                
-                # As per doc, `unscale_` should only be called once per optimizer 
-                # per `step` call and only after all gradients for that optimizer's 
+            if ((self.g_step + 1) % self.accumulation_steps == 0) or (
+                self.g_step + 1 == len(iterator)
+            ):
+                # As per doc, `unscale_` should only be called once per optimizer
+                # per `step` call and only after all gradients for that optimizer's
                 # assigned parameters have been accumulated.
-                # Calling `unscale_` twice for a given optimizer between each `step` 
+                # Calling `unscale_` twice for a given optimizer between each `step`
                 # triggers a RuntimeError.
 
                 if self.cfg.train_cfg.apply_grad_clipping:
@@ -299,8 +323,7 @@ class Trainer:
                         opt.param_groups[0]["params"],
                         max_norm=self.cfg.train_cfg.grad_clipping_max_norm,
                     )
-                
-                lr = self.lr_scheduler.step(g_step, opt)
+
                 scaler.step(opt)
                 scaler.update()
                 opt.zero_grad()
@@ -320,20 +343,25 @@ class Trainer:
                     f"LR: {lr:.5f}"
                 )
 
-                metrics = {"Epoch": (eps + 1), "Loss": loss, "Accuracy": acc, "BLEU": bleu, "LR": lr}
-                wandb.log(metrics, step=g_step)
+                metrics = {
+                    "Epoch": (eps + 1),
+                    "Loss": loss,
+                    "Accuracy": acc,
+                    "BLEU": bleu,
+                    "LR": lr,
+                }
+                wandb.log(metrics, step=self.g_step)
 
                 summ_writer.add_summary(
-                    {"loss": loss, "accuracy": acc, "lr": lr, "bleu" : bleu}, g_step
+                    {"loss": loss, "accuracy": acc, "lr": lr, "bleu": bleu}, self.g_step
                 )
-            g_step += 1
+            self.g_step += 1
 
     def __test_batch_loop(
         self,
         iterator: DataLoader,
         loss_fn: CrossEntropyLoss,
         summ_writer: SummaryHelper,
-        g_step: int,
     ) -> Tuple[float]:
         """Function to run the test loop at the end of each epoch.
 
@@ -342,7 +370,6 @@ class Trainer:
             loss_fn (CrossEntropyLoss): Cross entropy loss function instance.
             summ_writer (SummaryHelper): Summary object to store data for
                 tensorboard visualization.
-            g_step (int): Total iteration number.
 
         Returns:
             Tuple[float]: Tuple of average test loss and average test accuracy.
@@ -382,10 +409,15 @@ class Trainer:
                 "Avg. Test Accuracy": avg_test_acc,
                 "Avg. Test BLEU": avg_test_bleu,
             }
-            wandb.log(metrics, step=g_step)
+            wandb.log(metrics, step=self.g_step)
 
             summ_writer.add_summary(
-                {"loss": avg_test_loss, "accuracy": avg_test_acc, "bleu": avg_test_bleu}, g_step
+                {
+                    "loss": avg_test_loss,
+                    "accuracy": avg_test_acc,
+                    "bleu": avg_test_bleu,
+                },
+                self.g_step,
             )
         return avg_test_loss, avg_test_acc, avg_test_bleu
 
@@ -403,21 +435,20 @@ class Trainer:
         return SummaryHelper(summ_path)
 
     def __save_checkpoint(
-        self, eps: int, g_step: int, loss: float, opt: Optimizer, scaler: GradScaler
+        self, eps: int, loss: float, opt: Optimizer, scaler: GradScaler
     ) -> None:
         """Function to save the checkpoint along with model state, optimizer
         state, scaler state and other attributes corresponding to current epoch.
 
         Args:
             eps (int): Epoch number.
-            g_step (int): Total iteration number.
             loss (float): Test Loss value
             opt (Optimizer): Optimizer instance.
             scaler (GradScaler): Gradient scaler instance.
         """
         checkpoint = {
             "epoch": eps,
-            "global_step": g_step,
+            "global_step": self.g_step,
             "test_loss": loss,
             "model": self.transformer.state_dict(),
             "optimizer": opt.state_dict(),
@@ -468,8 +499,7 @@ class Trainer:
         )
 
     def train(self) -> None:
-        """Function to be used to train the model based on provided config.
-        """
+        """Function to be used to train the model based on provided config."""
         self.__print_model_summary()
 
         loss_fn = self.__get_loss_function()
@@ -477,7 +507,9 @@ class Trainer:
         opt = torch.optim.Adam(self.transformer.parameters(), lr=0.0, weight_decay=0.0)
         scaler = torch.cuda.amp.GradScaler(enabled=self.cfg.train_cfg.use_amp)
 
-        resume_eps, g_step = self.__resume_training(self.resume, self.resume_ckpt, opt, scaler)
+        resume_eps, self.g_step = self.__resume_training(
+            self.resume, self.resume_ckpt, opt, scaler
+        )
 
         train_writer = self.__get_summary_writer("train")
         test_writer = self.__get_summary_writer("test")
@@ -495,12 +527,11 @@ class Trainer:
             self.logger.info(f"Epoch: {eps + 1}/{self.epochs} Started")
             self.__train_batch_loop(train_iter, loss_fn, opt, scaler, train_writer, eps)
 
-            g_step = eps * len(train_iter)
             avg_test_loss, avg_test_acc, avg_test_bleu = self.__test_batch_loop(
-                test_iter, loss_fn, test_writer, g_step
+                test_iter, loss_fn, test_writer
             )
 
-            self.__save_checkpoint(eps + 1, g_step, avg_test_loss, opt, scaler)
+            self.__save_checkpoint(eps + 1, avg_test_loss, opt, scaler)
             self.logger.info(f"Epoch: {eps + 1}/{self.epochs} completed")
 
         print("Training Completed.")

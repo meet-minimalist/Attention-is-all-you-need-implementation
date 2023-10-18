@@ -55,6 +55,7 @@ class TrainingConfig:
     grad_accumulation_steps: int = 32  # This will make the effective batch size = batch_size * grad_accumulation_steps
     use_tpu: bool = False
 
+
 enc = EncoderConfig()
 dec = DecoderConfig()
 train_cfg = TrainingConfig()
